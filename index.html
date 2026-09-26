@@ -414,6 +414,13 @@ I.shield = rows(['..XXX..', '.XWFFX.', 'XWFFFFX', 'XFFFFFX', 'XFFFFFX', '.XFFFX.
 I.fever = rows(['...X...', '..XX...', '..XXX.X', '.XXYXXX', 'XXYYYXX', 'XXYYYXX', '.XXYXX.'], { X: '#ff6a2a', Y: '#ffe14a' });
 I.lucky = rows(['...X...', '..XXX..', 'XXXWXXX', '.XXXXX.', '..XXX..', '.XX.XX.', '.X...X.'], { X: '#ffc83a', W: '#ffffff' });
 I.heal = I.heart;
+I.cust = {
+  otter: paint(14, 13, G => { G.ell(7, 7, 5.5, 5, '#8a5a3a'); G.ell(7, 9, 3.2, 2.4, '#d8b48a'); G.set(3, 3, '#8a5a3a'); G.set(11, 3, '#8a5a3a'); G.set(5, 7, OUT); G.set(9, 7, OUT); G.set(7, 8, OUT); }),
+  gull: paint(14, 13, G => { G.ell(7, 7, 5, 5, '#f4f4f4'); G.rect(2, 9, 3, 3, '#b8c0cc'); G.rect(9, 9, 3, 3, '#b8c0cc'); G.tri(6, 8, 9, 8, 7.5, 11, '#ffc83a'); G.set(5, 6, OUT); G.set(9, 6, OUT); }),
+  crab: paint(16, 12, G => { G.ell(8, 8, 5.5, 3.5, '#e8453c'); G.rect(4, 2, 1, 4, '#e8453c'); G.rect(11, 2, 1, 4, '#e8453c'); G.set(4, 2, OUT); G.set(11, 2, OUT); G.ell(2, 6, 1.6, 1.6, '#e8453c'); G.ell(14, 6, 1.6, 1.6, '#e8453c'); G.set(6, 9, '#ffffff'); G.set(10, 9, '#ffffff'); }),
+};
+I.plate = paint(12, 7, G => { G.ell(6, 4.5, 5.5, 2, '#f4f4f4'); G.rect(4, 2, 4, 2, '#ff8a5a'); G.rect(4, 2, 4, 1, '#ffffff'); });
+I.plateGold = paint(12, 7, G => { G.ell(6, 4.5, 5.5, 2, '#ffd23f'); G.rect(3, 1, 6, 3, '#e05a50'); G.rect(3, 1, 6, 1, '#ffb0a0'); });
 I.home = rows(['...X...', '..XXX..', '.XXXXX.', 'XXXXXXX', '.XX.XX.', '.XX.XX.'], { X: '#ffffff' });
 I.skull = rows(['.XXXXX.', 'XXXXXXX', 'X.XXX.X', 'XXXXXXX', 'XXX.XXX', '.XXXXX.', '.X.X.X.'], { X: '#f0e6d2' });
 I.bang = rows(['XXX', 'XXX', 'XXX', 'XXX', '.X.', '...', 'XXX'], { X: '#ff3b3b' });
@@ -641,6 +648,172 @@ const owns = (c, id) => SHOP[c].items[0].id === id || WALLET.owned[c].includes(i
 const itemOf = (c, id) => SHOP[c].items.find(i => i.id === id) || SHOP[c].items[0];
 const gear = c => itemOf(c, WALLET.eq[c]);
 function earn(v) { WALLET.coins += v; saveWallet(); }
+// ============================================================ harbour café (between-run management)
+// Catches go into a cooler; the café sells them as dishes (semi-auto service), fills orders and buys upgrades.
+// Sea turtles, penguins and seahorses are released instead of cooked (+popularity).
+['turtle', 'penguin', 'seahorse'].forEach(k => { SP[k].rescue = true; });
+const DISHES = [ // one per zone, any non-rescue fish from that zone
+  { name: '鲜鱼寿司', price: 20 }, { name: '珊瑚刺身', price: 40 }, { name: '冰镇鱼片', price: 65 },
+  { name: '海盗烤鱼', price: 95 }, { name: '石板烧', price: 135 }, { name: '深渊火锅', price: 190 },
+];
+const BOSS_DISH = { puffer: 150, squid: 280, crab: 420, ghost: 560, serpent: 760, kraken: 1000 };
+const UPGRADES = [
+  { id: 'seat', name: '座位', desc: '同时接待更多客人' },
+  { id: 'kitchen', name: '厨具', desc: '每道菜 +25% 金币' },
+  { id: 'sign', name: '招牌', desc: '客人来得更快' },
+];
+const UP_COST = [400, 1200, 3500];
+let CAFE = load('sea-monster-cafe', null);
+if (!CAFE || typeof CAFE !== 'object') CAFE = {};
+CAFE.cooler = CAFE.cooler || {}; CAFE.boss = CAFE.boss || {}; CAFE.pop = CAFE.pop || 0;
+CAFE.up = Object.assign({ seat: 0, kitchen: 0, sign: 0 }, CAFE.up || {}); CAFE.orders = CAFE.orders || [];
+const saveCafe = () => save('sea-monster-cafe', CAFE);
+function storeFish(k, prem) { const c = CAFE.cooler[k] || (CAFE.cooler[k] = { n: 0, p: 0 }); c.n++; if (prem) c.p++; saveCafe(); }
+const zoneStock = z => ZONES[z].fish.reduce((s, k) => s + (CAFE.cooler[k] ? CAFE.cooler[k].n : 0), 0);
+const bossStock = () => BOSS_ORDER.reduce((s, k) => s + (CAFE.boss[k] || 0), 0);
+const totalStock = () => ZONES.reduce((s, z, i) => s + zoneStock(i), 0) + bossStock();
+function newOrder() {
+  const z = Math.floor(Math.random() * (Math.min(DEX.zone, ZONES.length - 1) + 1));
+  if (Math.random() < .2) return { crown: true, n: 1, reward: 250 * (z + 1) };
+  const k = pick(ZONES[z].fish.filter(f => !SP[f].rescue)), n = 1 + Math.floor(Math.random() * (z < 2 ? 3 : 2));
+  return { k, n, reward: R(DISHES[z].price * n * 1.6) };
+}
+function fillOrders() { while (CAFE.orders.length < 3) CAFE.orders.push(newOrder()); saveCafe(); }
+const premKey = () => Object.keys(CAFE.cooler).find(k => CAFE.cooler[k].p > 0);
+function canDeliver(o) { if (o.crown) return !!premKey(); const c = CAFE.cooler[o.k]; return !!c && c.n >= o.n; }
+function deliver(i) {
+  const o = CAFE.orders[i]; if (!canDeliver(o)) return false;
+  if (o.crown) { const c = CAFE.cooler[premKey()]; c.p--; c.n--; }
+  else { const c = CAFE.cooler[o.k]; for (let j = 0; j < o.n; j++) { if (c.n - c.p <= 0) c.p--; c.n--; } }
+  earn(o.reward); CAFE.pop += 2; CAFE.orders.splice(i, 1, newOrder()); saveCafe(); return true;
+}
+// ---------- service
+const cafe = { tab: 0, back: 'title', svc: false, cust: [], spawnT: 0, earned: 0 };
+const seatCount = () => 2 + CAFE.up.seat;
+const seatX = i => { const n = seatCount(); return R(22 + i * (136 / (n - 1))); };
+const arriveGap = () => 1.2 * (1 - .2 * CAFE.up.sign) / (1 + Math.min(1, CAFE.pop / 120));
+function nextDish() {
+  for (const bk of BOSS_ORDER.slice().reverse()) if ((CAFE.boss[bk] || 0) > 0) { CAFE.boss[bk]--; return { price: BOSS_DISH[bk], gold: true }; }
+  const avail = [];
+  ZONES.forEach((z, zi) => z.fish.forEach(k => { const c = CAFE.cooler[k]; if (c && c.n > 0) avail.push([k, zi]); }));
+  if (!avail.length) return null;
+  const [k, zi] = pick(avail), c = CAFE.cooler[k], prem = c.p > 0;
+  c.n--; if (prem) c.p--;
+  return { price: DISHES[zi].price * (prem ? 2 : 1), prem };
+}
+function openCafe(from) { cafe.back = from; cafe.cust = []; cafe.svc = false; fillOrders(); go('cafe'); SFX.click(); }
+function updCafe(dt) {
+  if (!cafe.svc) return;
+  cafe.spawnT -= dt;
+  const used = cafe.cust.map(c => c.seat);
+  if (cafe.spawnT <= 0 && cafe.cust.length < seatCount()) {
+    const d = nextDish();
+    if (d) {
+      let seat = 0; while (used.includes(seat)) seat++;
+      cafe.cust.push({ seat, kind: pick(['otter', 'gull', 'crab']), t: 0, ph: 'walk', d, x: -12 });
+      cafe.spawnT = arriveGap(); saveCafe();
+    }
+  }
+  for (let i = cafe.cust.length - 1; i >= 0; i--) {
+    const c = cafe.cust[i], tx = seatX(c.seat); c.t += dt;
+    if (c.ph === 'walk') { c.x += Math.sign(tx - c.x) * Math.min(Math.abs(tx - c.x), 110 * dt); if (c.x === tx) { c.ph = 'eat'; c.t = 0; } }
+    else if (c.ph === 'eat' && c.t > 1.3) {
+      const v = R(c.d.price * (1 + .25 * CAFE.up.kitchen)); earn(v); cafe.earned += v;
+      pop('+' + v, tx, 118, '#ffe14a', 9, .9); SFX.coin(); c.ph = 'leave'; c.t = 0;
+    } else if (c.ph === 'leave') { c.x += 140 * dt; if (c.x > W + 14) cafe.cust.splice(i, 1); }
+  }
+  if (!cafe.cust.length && totalStock() === 0) { cafe.svc = false; pop('打烊啦! +' + cafe.earned, 90, 70, '#ffe14a', 12, 2); SFX.caught(); }
+}
+const CAFE_TABS = ['营业', '订单', '升级'];
+const cafeTab = i => [8 + i * 56, 164, 52, 15];
+const CAFE_BTN = { close: [152, 3, 24, 14], open: [40, 280, 100, 20] };
+const orderBtn = i => [120, 196 + i * 38, 46, 16];
+const upBtn = i => [120, 196 + i * 38, 46, 16];
+function cafePress(p) {
+  if (inR(p, CAFE_BTN.close)) { go(cafe.back); st = 2; SFX.click(); return; }
+  for (let i = 0; i < 3; i++) if (inR(p, cafeTab(i))) { cafe.tab = i; SFX.click(); return; }
+  if (cafe.tab === 0 && inR(p, CAFE_BTN.open) && !cafe.svc) {
+    if (totalStock() > 0) { cafe.svc = true; cafe.spawnT = 0; cafe.earned = 0; SFX.click(); }
+    else { pop('冰箱是空的', 90, 270, '#ff8a7a', 9, 1); SFX.fail(); }
+    return;
+  }
+  if (cafe.tab === 1) for (let i = 0; i < CAFE.orders.length; i++) if (inR(p, orderBtn(i))) {
+    const o = CAFE.orders[i];
+    if (deliver(i)) { pop('+' + o.reward, 140, 190 + i * 38, '#ffe14a', 10, 1); SFX.buff(); } else { pop('鱼不够', 140, 190 + i * 38, '#ff8a7a', 9, .9); SFX.fail(); }
+    return;
+  }
+  if (cafe.tab === 2) UPGRADES.forEach((u, i) => {
+    if (!inR(p, upBtn(i))) return;
+    const lv = CAFE.up[u.id];
+    if (lv >= 3) return;
+    if (WALLET.coins < UP_COST[lv]) { pop('金币不足', 140, 190 + i * 38, '#ff8a7a', 9, .9); SFX.fail(); return; }
+    WALLET.coins -= UP_COST[lv]; saveWallet(); CAFE.up[u.id]++; saveCafe(); SFX.buff(); pop('升级!', 140, 190 + i * 38, '#ffe14a', 10, 1);
+  });
+}
+function drawCafe() {
+  // room
+  g.fillStyle = '#e9c58f'; g.fillRect(0, 0, W, 106);
+  g.fillStyle = '#d9b27a'; for (let x = 4; x < W; x += 12) g.fillRect(x, 20, 1, 86);
+  g.fillStyle = OUT; g.fillRect(118, 26, 52, 34);
+  g.fillStyle = '#9ad9ff'; g.fillRect(119, 27, 50, 16); g.fillStyle = '#46bcd0'; g.fillRect(119, 43, 50, 16);
+  g.fillStyle = '#e6fbff'; for (let x = 120; x < 168; x += 6) g.fillRect(x + R(Math.sin(T * 2 + x)), 43, 3, 1);
+  g.fillStyle = '#8a5428'; g.fillRect(143, 26, 2, 34); g.fillRect(118, 42, 52, 1);
+  panel(8, 26, 76, 24); txt('渔喵小馆', 46, 38, 10, '#7a3b12', 'center', null);
+  g.drawImage(catImg(blinkT < 0 ? 'blink' : 'happy', WALLET.eq.fur, WALLET.eq.hat), 79, 82);
+  g.fillStyle = '#6b3f1f'; g.fillRect(0, 104, W, 16); g.fillStyle = '#b77b46'; g.fillRect(0, 104, W, 3); g.fillStyle = OUT; g.fillRect(0, 107, W, 1);
+  g.fillStyle = '#b98a5a'; g.fillRect(0, 120, W, 42);
+  g.fillStyle = '#a87a4a'; for (let y = 120; y < 162; y += 8) for (let x = ((y / 8) % 2) * 8; x < W; x += 16) g.fillRect(x, y, 8, 8);
+  // stools + customers
+  for (let i = 0; i < seatCount(); i++) { const x = seatX(i); g.fillStyle = OUT; g.fillRect(x - 6, 146, 12, 3); g.fillRect(x - 1, 149, 2, 10); g.fillStyle = '#c0392b'; g.fillRect(x - 5, 146, 10, 2); }
+  for (const c of cafe.cust) {
+    const img = I.cust[c.kind], bob = c.ph === 'eat' ? R(Math.abs(Math.sin(c.t * 8))) : R(Math.abs(Math.sin(c.t * 12)) * 2);
+    g.drawImage(img, R(c.x - img.width / 2), 133 - bob);
+    if (c.ph === 'eat') { const pl = c.d.gold ? I.plateGold : I.plate; g.drawImage(pl, R(c.x - 6), 112); if (c.d.prem || c.d.gold) { g.fillStyle = '#fff6c0'; g.fillRect(R(c.x + 4 + Math.sin(T * 6) * 2), 110, 1, 1); } }
+  }
+  // top bar
+  g.drawImage(I.coin, 4, 4); txt(String(WALLET.coins), 15, 9, 8, '#ffe14a', 'left');
+  g.drawImage(I.heart, 64, 4); txt('人气 ' + CAFE.pop, 75, 9, 8, '#ffd0da', 'left');
+  button(CAFE_BTN.close, '×');
+  CAFE_TABS.forEach((name, i) => {
+    const r = cafeTab(i);
+    if (i === cafe.tab) { g.fillStyle = OUT; g.fillRect(r[0], r[1], r[2], r[3]); g.fillStyle = '#8a4a2a'; g.fillRect(r[0] + 1, r[1] + 1, r[2] - 2, r[3] - 2); txt(name, r[0] + r[2] / 2, r[1] + 7, 8, '#ffe14a', 'center', OUT); }
+    else button(r, name);
+  });
+  panel(4, 182, 172, 134);
+  const dark = '#4a2c17';
+  if (cafe.tab === 0) {
+    DISHES.forEach((d, z) => {
+      const x = 10 + (z % 2) * 80, y = 190 + Math.floor(z / 2) * 24, open = z <= DEX.zone;
+      g.fillStyle = '#c9a86a'; g.fillRect(x, y, 78, 22); g.fillStyle = '#ecd49c'; g.fillRect(x + 1, y + 1, 76, 20);
+      txt(open ? d.name : '???', x + 4, y + 7, 7, dark, 'left', null);
+      if (open) { txt('×' + zoneStock(z), x + 4, y + 16, 7, '#7a3b12', 'left', null); g.drawImage(I.coin, x + 40, y + 11); txt(String(d.price), x + 50, y + 16, 7, '#9a6a00', 'left', null); }
+    });
+    txt('海怪招牌菜 ×' + bossStock(), 90, 268, 8, '#7a2a1a', 'center', null);
+    if (cafe.svc) { g.fillStyle = '#8a7a60'; g.fillRect(...CAFE_BTN.open); txt('营业中  +' + cafe.earned, 90, 290, 9, '#f6e3b4', 'center', null); }
+    else button(CAFE_BTN.open, totalStock() ? '开始营业' : '冰箱是空的');
+  } else if (cafe.tab === 1) {
+    CAFE.orders.forEach((o, i) => {
+      const y = 188 + i * 38;
+      g.fillStyle = '#c9a86a'; g.fillRect(10, y, 160, 34); g.fillStyle = '#ecd49c'; g.fillRect(11, y + 1, 158, 32);
+      if (o.crown) { const ci = I.crown.gold; g.drawImage(ci, 18, y + 10, ci.width * 2, ci.height * 2); txt('带冠的鱼', 44, y + 12, 8, dark, 'left', null); }
+      else { drawFit(SPR[o.k].r, 30, y + 17, 34, 22, 1); txt(SP[o.k].name + ' ×' + o.n, 50, y + 12, 8, dark, 'left', null); }
+      g.drawImage(I.coin, 50, y + 20); txt(String(o.reward), 61, y + 25, 8, '#9a6a00', 'left', null);
+      const b = orderBtn(i);
+      if (canDeliver(o)) button(b, '交付'); else { g.fillStyle = '#8a7a60'; g.fillRect(...b); txt('鱼不够', b[0] + b[2] / 2, b[1] + 7, 7, '#f6e3b4', 'center', null); }
+    });
+  } else {
+    UPGRADES.forEach((u, i) => {
+      const y = 188 + i * 38, lv = CAFE.up[u.id];
+      g.fillStyle = '#c9a86a'; g.fillRect(10, y, 160, 34); g.fillStyle = '#ecd49c'; g.fillRect(11, y + 1, 158, 32);
+      txt(u.name, 16, y + 10, 9, dark, 'left', null); txt(u.desc, 16, y + 24, 7, '#7a3b12', 'left', null);
+      for (let k = 0; k < 3; k++) { g.fillStyle = OUT; g.fillRect(50 + k * 8, y + 6, 6, 6); g.fillStyle = k < lv ? '#ffd23f' : '#8a7a60'; g.fillRect(51 + k * 8, y + 7, 4, 4); }
+      const b = upBtn(i);
+      if (lv >= 3) { g.fillStyle = '#8a7a60'; g.fillRect(...b); txt('已满', b[0] + b[2] / 2, b[1] + 7, 8, '#f6e3b4', 'center', null); }
+      else { button(b, ''); g.drawImage(I.coin, b[0] + 3, b[1] + 3); txt(String(UP_COST[lv]), b[0] + 13, b[1] + 7, 8, '#ffffff', 'left', OUT); }
+    });
+  }
+}
+
 
 // ============================================================ audio + haptics
 let AC = null, NB = null;
@@ -750,6 +923,11 @@ const SONGS = {
         chords: [[0, 'm7'], [5, 'm7'], [-2, '7'], [3, 'M7'], [-4, 'M7'], [5, 'm7'], [7, '7'], [0, 'm']],
         mel: [19, _, _, _, 17, _, 15, _,   17, _, _, _, 12, _, _, _,   14, _, 17, _, 20, _, 19, _,   19, _, _, _, _, _, _, _,
               20, _, _, _, 19, _, 15, _,   17, _, 15, _, 12, _, _, _,  14, _, _, _, 11, _, _, _,   12, _, _, _, _, _, _, _] },
+  // 渔喵小馆: cosy jazzy D major
+  cafe: { bpm: 108, swing: .2, root: 62, lead: INST.marimba, bass: 'walk', comp: 'off', drums: 'K.h.K.hw',
+        chords: [[0, 'M7'], [-3, 'm7'], [2, 'm7'], [7, '7'], [0, 'M7'], [-3, 'm7'], [2, 'm7'], [7, '7']],
+        mel: [16, _, 14, 12, _, 9, 12, _,   14, _, _, 12, 9, _, 7, _,   14, _, 17, _, 19, _, 17, 14,   16, _, _, _, _, _, 11, _,
+              12, _, 16, _, 19, _, 21, 19,  21, _, 19, 16, _, 14, 12, _,  14, _, 17, 16, 14, _, 12, _,   11, _, _, 7, _, 9, 11, _] },
   // 海怪战: upbeat, urgent but fun (transposed to the zone)
   boss: { bpm: 160, root: 57, lead: INST.lead, bass: 'root8', comp: 'stab', drums: 'khskkhsh',
         chords: [[0, 'm'], [-4, 'M'], [-2, 'M'], [0, 'm'], [0, 'm'], [-4, 'M'], [-2, 'M'], [7, '7']],
@@ -833,6 +1011,7 @@ function playStep(song, i, t, spb) {
 }
 function wantedTrack() {
   if (state === 'menu') return MUS.cur;
+  if (state === 'cafe') return 'cafe';
   if (state === 'over' || state === 'win' || state === 'trans') return null;
   if (state === 'warn' || state === 'boss' || (state === 'leap' && leap && leap.boss) || (state === 'pause' && B)) return 'boss';
   if (state === 'show' && show && show.boss) return null;
@@ -983,8 +1162,8 @@ window.addEventListener('resize', fit); fit();
 function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
 const inR = (p, r) => p.x >= r[0] && p.x <= r[0] + r[2] && p.y >= r[1] && p.y <= r[1] + r[3];
 const BTN = {
-  titleDex: [28, 248, 60, 17], titleShop: [92, 248, 60, 17],
-  cont: [26, 196, 128, 18], again: [22, 218, 46, 17], overDex: [70, 218, 40, 17], overShop: [112, 218, 46, 17],
+  titleDex: [12, 248, 50, 17], titleCafe: [65, 248, 50, 17], titleShop: [118, 248, 50, 17],
+  cont: [26, 196, 128, 18], again: [22, 218, 46, 17], overCafe: [70, 218, 40, 17], overShop: [112, 218, 46, 17],
   shopClose: [146, 26, 22, 14],
   resume: [40, 194, 100, 20], newGame: [58, 220, 64, 16],
   menuBack: [40, 136, 100, 20], menuHome: [40, 164, 100, 20],
@@ -993,7 +1172,7 @@ const BTN = {
 window.addEventListener('pointerdown', e => {
   e.preventDefault(); initAudio();
   const p = toLogical(e);
-  if (p.x >= 162 && p.y <= 18 && p.y >= -10) { muted = !muted; save('sea-monster-mute', muted); return; }
+  if (state !== 'cafe' && p.x >= 162 && p.y <= 18 && p.y >= -10) { muted = !muted; save('sea-monster-mute', muted); return; }
   if (p.x >= 160 && p.y > 18 && p.y <= 38 && IN_RUN.includes(state)) { menuFrom = state; hold = false; go('menu'); SFX.click(); return; }
   hold = true; if (state === 'fight' || state === 'boss') jerk = true; onPress(p);
 }, { passive: false });
@@ -1031,6 +1210,7 @@ function onPress(p) {
   if (state === 'title') {
     if (inR(p, BTN.titleDex)) openDex('title');
     else if (inR(p, BTN.titleShop)) openShop('title');
+    else if (inR(p, BTN.titleCafe)) openCafe('title');
     else if (SAVED) { if (inR(p, BTN.resume)) resumeRun(); else if (inR(p, BTN.newGame)) { newRun(); go('idle'); } }
     else { newRun(); go('idle'); }
     return;
@@ -1041,6 +1221,7 @@ function onPress(p) {
     return;
   }
   if (state === 'shop') { shopPress(p); return; }
+  if (state === 'cafe') { cafePress(p); return; }
   if (state === 'dex') {
     if (inR(p, BTN.dexClose)) { go(dexBack); st = 2; SFX.click(); }
     else if (inR(p, BTN.dexPrev)) { dexPage = (dexPage + ZONES.length - 1) % ZONES.length; SFX.click(); }
@@ -1053,7 +1234,7 @@ function onPress(p) {
   if ((state === 'over' || state === 'win') && st > .5) {
     if (state === 'over' && inR(p, BTN.cont)) continueRun();
     else if (inR(p, BTN.again)) { newRun(); go('idle'); }
-    else if (inR(p, BTN.overDex)) openDex(state);
+    else if (inR(p, BTN.overCafe)) openCafe(state);
     else if (inR(p, BTN.overShop)) openShop(state);
   }
 }
@@ -1208,20 +1389,23 @@ function startShow() {
     const d = BOSSES[leap.key], val = R(d.val * run.gold), first = !DEX.boss[leap.key];
     run.coins += val; earn(val); run.hp = Math.min(6, run.hp + 1);
     DEX.boss[leap.key] = { n: ((DEX.boss[leap.key] || {}).n || 0) + 1 }; save('sea-monster-dex', DEX);
-    show = { boss: true, key: leap.key, name: d.name, val, img: leap.img, w: leap.w, h: leap.h, sc: leap.sc, first };
+    CAFE.boss[leap.key] = (CAFE.boss[leap.key] || 0) + 3; saveCafe();
+    show = { boss: true, key: leap.key, name: d.name, val, img: leap.img, w: leap.w, h: leap.h, sc: leap.sc, first, note: '海怪招牌菜 +3 份' };
     coinBurst(90, 190, 16); SFX.win(); vib([40, 30, 40, 30, 80]);
   } else {
     const sp = SP[leap.key], shiny = leap.shiny;
     // size: bell curve between 0.6x and 1.5x of the species' usual size; the extremes earn crowns
     const x = (Math.random() + Math.random()) / 2, crown = x >= .9 ? 'gold' : x >= .8 ? 'silver' : x <= .1 ? 'mini' : null;
     const cm = Math.max(1, R(sp.cm * (.6 + .9 * x) * (shiny ? 1.3 : 1)));
-    const val = R(sp.val * run.gold * (shiny ? 5 : 1) * (crown === 'silver' ? 1.5 : crown ? 2 : 1));
+    const val = R(sp.val * .5 * run.gold * (shiny ? 5 : 1) * (crown === 'silver' ? 1.5 : crown ? 2 : 1));
     const prev = DEX.fish[leap.key], first = !prev, record = !!prev && (cm > prev.max || cm < (prev.min || prev.max));
     DEX.fish[leap.key] = { n: (prev ? prev.n : 0) + 1, max: Math.max(prev ? prev.max : 0, cm), min: Math.min(prev ? (prev.min || prev.max) : cm, cm),
                            shiny: !!(prev && prev.shiny) || shiny, gold: !!(prev && prev.gold) || crown === 'gold', mini: !!(prev && prev.mini) || crown === 'mini' };
     save('sea-monster-dex', DEX);
     run.coins += val; earn(val); applyBuff(sp.buff, sp.lvl); if (shiny) applyBuff(sp.buff, sp.lvl);
-    show = { boss: false, key: leap.key, name: sp.name, label: sp.label, buff: sp.buff, val, cm, crown, first, record, shiny, img: leap.img, w: leap.w, h: leap.h, sc: leap.sc };
+    if (sp.rescue) { CAFE.pop += 1; saveCafe(); } else storeFish(leap.key, shiny || !!crown);
+    show = { boss: false, key: leap.key, name: sp.name, label: sp.label, buff: sp.buff, val, cm, crown, first, record, shiny, img: leap.img, w: leap.w, h: leap.h, sc: leap.sc,
+             note: sp.rescue ? '放生  人气+1' : (shiny || crown ? '高级食材 存入冰箱' : '存入冰箱') };
     if (crown === 'gold' || crown === 'mini') { flash = Math.max(flash, .4); SFX.shiny(); }
     coinBurst(90, 190, Math.min(16, 3 + (val >> 2))); SFX.caught(); SFX.buff(); if (shiny) { SFX.shiny(); flash = .5; }
   }
@@ -1359,7 +1543,8 @@ function update(dt, rdt) {
   if (zapBolt) { zapBolt.t -= rdt; if (zapBolt.t <= 0) zapBolt = null; }
   if (run) { coinsShown += (run.coins - coinsShown) * Math.min(1, rdt * 4); if (Math.abs(run.coins - coinsShown) < .5) coinsShown = run.coins; if (run.newT > 0) run.newT -= rdt; }
   coinSfxT -= rdt;
-  if (state === 'dex' || state === 'shop' || state === 'menu') { for (let i = POPS.length - 1; i >= 0; i--) { const p = POPS[i]; p.life -= rdt; p.y -= 14 * rdt; if (p.life <= 0) POPS.splice(i, 1); } return; }
+  if (state === 'cafe') updCafe(rdt);
+  if (state === 'dex' || state === 'shop' || state === 'menu' || state === 'cafe') { for (let i = POPS.length - 1; i >= 0; i--) { const p = POPS[i]; p.life -= rdt; p.y -= 14 * rdt; if (p.life <= 0) POPS.splice(i, 1); } return; }
   const z = Z();
   for (let i = decor.length - 1; i >= 0; i--) {
     const f = decor[i]; f.x += f.vx * dt * (f.flee ? 3 : 1); f.y += Math.sin(T * 1.3 + f.x * .05) * .05;
@@ -1614,7 +1799,7 @@ function drawLeap() {
 
 // ============================================================ HUD + overlays
 function drawHUD(z) {
-  if (!run || state === 'title' || state === 'dex' || state === 'shop') return;
+  if (!run || state === 'title' || state === 'dex' || state === 'shop' || state === 'cafe') return;
   if (IN_RUN.includes(state) || state === 'menu') g.drawImage(I.home, 169, 24);
   const n = Math.max(3, run.hp);
   for (let i = 0; i < n; i++) g.drawImage(i < run.hp ? I.heart : I.heartE, 2 + i * 9, 2);
@@ -1658,13 +1843,15 @@ function drawOverlay(z) {
       if (Math.floor(T * 2) % 2 === 0) txt('点击开始', 90, 208, 12, '#ffffff');
       g.drawImage(I.hand, 104, 218 + R(Math.abs(Math.sin(T * 4)) * -4));
     }
-    button(BTN.titleDex, '图鉴 ' + dexCount() + '/' + DEX_TOTAL); button(BTN.titleShop, '商店');
+    button(BTN.titleDex, '图鉴'); button(BTN.titleCafe, '小馆'); button(BTN.titleShop, '商店');
+    if (totalStock() > 0) { g.fillStyle = OUT; g.fillRect(108, 245, 7, 7); g.fillStyle = '#e8453c'; g.fillRect(109, 246, 5, 5); }
     g.drawImage(I.coin, 70, 272); txt(String(WALLET.coins), 81, 277, 8, '#ffe14a', 'left');
     if (best > 0) txt('最高纪录 ' + best, 90, 292, 7, '#dff6ff');
     return;
   }
   if (state === 'dex') { drawDex(); return; }
   if (state === 'shop') { drawShop(); return; }
+  if (state === 'cafe') { drawCafe(); return; }
   if (state === 'menu') {
     g.globalAlpha = .6; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
     panel(28, 104, 124, 100);
@@ -1740,7 +1927,7 @@ function drawOverlay(z) {
     txt((run.newBest ? '新纪录!  ' : '') + '钱包 ' + WALLET.coins + ' 金币', 90, 177, 9, run.newBest ? '#c0392b' : '#8a6a4a', 'center', null);
     if (st > .5) {
       if (!win) button(BTN.cont, '从 ' + ZONES[run.zone].name + ' 继续');
-      button(BTN.again, win ? '再来一次' : '从头开始'); button(BTN.overDex, '图鉴'); button(BTN.overShop, '商店');
+      button(BTN.again, win ? '再来一次' : '从头开始'); button(BTN.overCafe, '小馆'); button(BTN.overShop, '商店');
     }
     if (win && Math.random() < .15) sparks(rand(20, 160), rand(30, 90), pick(['#ffe14a', '#ff6fae', '#6fe3ff']), 14, 60);
   }
@@ -1774,6 +1961,7 @@ function drawCard() {
     txt(sh.label + (sh.shiny ? ' ×2' : ''), 68, 173, 11, '#7a3b12', 'left', null);
     g.drawImage(I.coin, 72, 190); txt('+' + sh.val, 83, 195, 9, '#9a6a00', 'left', null);
   }
+  if (sh.note) txt(sh.note, 90, py + ph - 10, 7, '#5a7a3a', 'center', null);
   if (st > .35 && Math.floor(T * 2.5) % 2 === 0) txt('点击继续', 90, py + ph + 11, 9, '#ffffff');
 }
 // Big always-on action bar during bites and fights: what to do right now, in two words and a hand.
@@ -1886,7 +2074,7 @@ function render() {
   drawParts(); drawInk(); drawBolt();
   if (state === 'leap' && leap) drawLeap();
   drawHUD(z);
-  g.drawImage(muted ? I.mute : I.sound, 168, 3);
+  if (state !== 'cafe') g.drawImage(muted ? I.mute : I.sound, 168, 3);
   drawOverlay(z);
   for (const p of POPS) txt(p.s, p.x, p.y, p.size, p.col, 'center', OUT, Math.min(1, p.life / p.max * 2));
   if (flash > 0) { g.globalAlpha = Math.min(.4, flash * .5); g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
