@@ -40,7 +40,7 @@ const SCRIPT_TEXT = document.currentScript ? document.currentScript.textContent 
 const W = 180, H = 320, SURF = 84, SEABED = 300, NEED = 4, BX = 6, OUT = '#1b1b2f';
 // Fight tuning (checked with a Monte-Carlo of play styles): holding through a dash must snap the line,
 // random tapping must lose, and a player reacting to the "!" within ~0.4s should land most fish.
-const REEL = 60, DASH_RATE = 240, JERK = 11;
+const REEL = 60, DASH_RATE = 215, JERK = 11;
 const FONT = '"ZCOOL QingKe HuangYou","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif';
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -385,12 +385,12 @@ const SPRB = {
 };
 // y0/y1: where the boss sits at 0% and 100% progress. card: sprite + facing used on the catch card and in the dex.
 const BOSSES = {
-  puffer:  { name: '巨型河豚',   len: 480, pow: .75, spd: 22, tele: .55, calm: () => rand(1.6, 2.6), dash: () => rand(.9, 1.3), y0: 262, y1: 165, val: 120,  card: () => SPRB.puffer.l },
-  squid:   { name: '大王乌贼',   len: 680, pow: .95, spd: 30, tele: .45, calm: () => rand(1.1, 2.1), dash: () => rand(.8, 1.2),  y0: 225, y1: 140, val: 260,  card: () => SPRB.squid.r },
-  crab:    { name: '冰霜巨蟹',   len: 800, pow: 1.0, spd: 32, tele: .4,  calm: () => rand(1.3, 2.2), dash: () => rand(.45, .7), y0: 250, y1: 165, val: 400,  card: () => SPRB.crab.r },
-  ghost:   { name: '幽灵鲨',     len: 920, pow: 1.05, spd: 32, tele: .5, calm: () => rand(1.1, 2),   dash: () => rand(.7, 1.1),  y0: 235, y1: 150, val: 520,  card: () => SPRB.ghost.l },
-  serpent: { name: '熔岩海蛇',   len: 1040, pow: 1.1, spd: 34, tele: .5,  calm: () => rand(1, 1.9),   dash: () => rand(.7, 1.1),  y0: 232, y1: 150, val: 700,  card: () => SPRB.serpent.l },
-  kraken:  { name: '深渊克拉肯', len: 1350, pow: 1.4, spd: 34, tele: .42, calm: () => rand(.8, 1.6),  dash: () => rand(.7, 1.1),  y0: 245, y1: 165, val: 1000, card: () => SPRB.kraken.r },
+  puffer:  { name: '巨型河豚',   len: 480, pow: .75, spd: 22, tele: .65, calm: () => rand(1.6, 2.6), dash: () => rand(.9, 1.3), y0: 262, y1: 165, val: 120,  card: () => SPRB.puffer.l },
+  squid:   { name: '大王乌贼',   len: 680, pow: .95, spd: 30, tele: .55, calm: () => rand(1.1, 2.1), dash: () => rand(.8, 1.2),  y0: 225, y1: 140, val: 260,  card: () => SPRB.squid.r },
+  crab:    { name: '冰霜巨蟹',   len: 800, pow: 1.0, spd: 32, tele: .5,  calm: () => rand(1.3, 2.2), dash: () => rand(.45, .7), y0: 250, y1: 165, val: 400,  card: () => SPRB.crab.r },
+  ghost:   { name: '幽灵鲨',     len: 920, pow: 1.05, spd: 32, tele: .6, calm: () => rand(1.1, 2),   dash: () => rand(.7, 1.1),  y0: 235, y1: 150, val: 520,  card: () => SPRB.ghost.l },
+  serpent: { name: '熔岩海蛇',   len: 1040, pow: 1.1, spd: 34, tele: .6,  calm: () => rand(1, 1.9),   dash: () => rand(.7, 1.1),  y0: 232, y1: 150, val: 700,  card: () => SPRB.serpent.l },
+  kraken:  { name: '深渊克拉肯', len: 1350, pow: 1.4, spd: 34, tele: .52, calm: () => rand(.8, 1.6),  dash: () => rand(.7, 1.1),  y0: 245, y1: 165, val: 1000, card: () => SPRB.kraken.r },
 };
 const BOSS_ORDER = ZONES.map(z => z.boss);
 const FISH_ORDER = ZONES.flatMap(z => z.fish);
@@ -801,7 +801,7 @@ function startFight() {
   F = { key: biter.key, shiny: biter.shiny, x: biter.x, y: biter.y, px: biter.x, py: biter.y, face: biter.face, state: 'calm',
         timer: run.fishTotal === 0 ? 1.8 : rand(.6, 1.2), stun: 0, grace: 0, frenzy: run.fever,
         pow: sp.pow * z.pow * run.calm, spd: sp.spd * (.9 + z.pow * .2) * (.5 + .5 * run.slow), freq: sp.freq * (.85 + .15 * z.pow), dir: 1, critT: .45, zapT: zapInterval(),
-        weight: 1 + .12 * run.zone, tele: .45 - .02 * run.zone };
+        weight: 1 + .12 * run.zone, tele: .62 - .025 * run.zone };
   biter = null; tension = 25; run.fights++;
   splash(bob.x, 8, .8); bob = null; hook = null;
   go('fight'); SFX.hook(); vib(30); shake = 2;
@@ -809,7 +809,7 @@ function startFight() {
 function actorTimers(A, dt, tele, dashDur, calmDur) {
   if (A.stun > 0) { A.stun -= dt; if (A.state !== 'calm') { A.state = 'calm'; A.timer = calmDur(); A.erupt = false; } return; }
   A.timer -= dt; if (A.timer > 0) return;
-  if (A.state === 'calm') { A.state = 'tele'; A.timer = tele; SFX.tele(); if (A.onTele) A.onTele(); }
+  if (A.state === 'calm') { A.state = 'tele'; A.timer = tele; SFX.tele(); vib(35); if (A.onTele) A.onTele(); }
   else if (A.state === 'tele') { A.state = 'dash'; A.timer = dashDur() * run.slow * (A.erupt ? 1.5 : 1); A.dir = Math.random() < .5 ? -1 : 1; SFX.dash(); shake = Math.max(shake, A.erupt ? 5 : 1.5); }
   else {
     A.erupt = false;
@@ -1219,7 +1219,7 @@ function drawFight() {
   else if (f.state === 'tele' && Math.floor(T * 14) % 2 === 0) mode = 'w';
   const jx = isDashing(f) ? (Math.random() < .5 ? -1 : 1) : 0;
   drawFishAt(f.key, f.x + jx, f.y, f.face, mode);
-  if (f.state === 'tele') { const S = SPR[f.key]; g.drawImage(I.bang, R(f.x - f.face * S.w / 2 - 2), R(f.y - S.h / 2 - 13)); }
+  if (f.state === 'tele') { const S = SPR[f.key]; g.drawImage(I.bang, R(f.x - f.face * S.w / 2 - 5), R(f.y - S.h / 2 - 22), 10, 18); }
 }
 function drawBoss() {
   const b = B, fl = b.state === 'tele' && Math.floor(T * 14) % 2 === 0, stun = b.stun > 0 && Math.floor(T * 16) % 2 === 0;
@@ -1253,7 +1253,7 @@ function drawBoss() {
     top = R(b.y); g.drawImage(img(S, false), R(b.x - S.w / 2), top);
     roots.forEach(p => capBase(p, 4, stun ? '#fff27a' : fl ? '#ffffff' : '#6b3d8f'));
   }
-  if (b.state === 'tele') g.drawImage(b.erupt ? I.bangY : I.bang, R(b.x - 2), top - 13);
+  if (b.state === 'tele') g.drawImage(b.erupt ? I.bangY : I.bang, R(b.x - 5), top - 22, 10, 18);
 }
 function drawParts() {
   for (const p of P) {
@@ -1336,6 +1336,11 @@ function drawOverlay(z) {
   if (state === 'fight' || state === 'boss') {
     const A = state === 'fight' ? F : B;
     drawTension(state === 'boss' && B && B.invis);
+    if (A && A.state === 'tele' && Math.floor(T * 12) % 2 === 0) {
+      // red frame around the screen while a struggle is winding up
+      g.fillStyle = '#ff3b3b'; g.globalAlpha = .75;
+      g.fillRect(0, 0, W, 3); g.fillRect(0, H - 3, W, 3); g.fillRect(0, 0, 3, H); g.fillRect(W - 3, 0, 3, H); g.globalAlpha = 1;
+    }
     if (hold && tension > 60) txt('松手!', 150, 96, 12, '#ff5a4a');
     else if (!hold && A && A.state === 'calm' && run.fights <= 3) txt('按住收线', 90, 288, 10, '#ffffff');
     if (A && A.frenzy > 0) {
