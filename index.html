@@ -632,9 +632,10 @@ const SHOP = {
 };
 const SHOP_CATS = ['hat', 'rod', 'boat', 'fur'];
 let WALLET = load('sea-monster-shop', null);
-if (!WALLET || typeof WALLET.coins !== 'number') WALLET = { coins: 0, owned: {}, eq: {} };
+if (!WALLET || typeof WALLET.coins !== 'number') WALLET = { coins: Math.max(0, +load('sea-monster-best', 0) || 0), owned: {}, eq: {} };
 SHOP_CATS.forEach(c => { WALLET.owned[c] = WALLET.owned[c] || []; if (!WALLET.eq[c]) WALLET.eq[c] = SHOP[c].items[0].id; });
 const saveWallet = () => save('sea-monster-shop', WALLET);
+saveWallet();
 const owns = (c, id) => SHOP[c].items[0].id === id || WALLET.owned[c].includes(id);
 const itemOf = (c, id) => SHOP[c].items.find(i => i.id === id) || SHOP[c].items[0];
 const gear = c => itemOf(c, WALLET.eq[c]);
@@ -698,44 +699,70 @@ const SFX = {
 };
 function vib(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
 
-// ============================================================ music (synthesised chiptune loops)
-// Patterns are semitone offsets; null = rest (the previous note rings on). bass is one bar, repeated over
-// `chords` (per-bar bass shifts); mel/arp span the whole loop; drums: k kick, K soft kick, s snare, h hat, x shaker, r rim.
+// ============================================================ music (synthesised, cosy handheld-sim style)
+// Each song: 8 bars of chords [rootOffset, quality], a hand-written melody (semitones from root per step,
+// null = let the note ring), and styles for bass / comping / drums that are generated from the chords.
+// drums per bar: k kick, K soft kick, s snare, h hat, x shaker, w woodblock, r rim.
 const _ = null;
 const INST = {
-  sq: { type: 'square', vol: .045, dec: .22 },
-  mar: { type: 'triangle', vol: .11, dec: .16 },
-  bell: { type: 'sine', vol: .06, dec: .7, echo: true },
-  acc: { type: 'square', vol: .03, att: .02, detune: 9, vib: 5 },
-  eerie: { type: 'sine', vol: .05, att: .15, echo: true, vib: 4 },
-  tri: { type: 'triangle', vol: .12 },
-  saw: { type: 'sawtooth', vol: .045 },
-  sub: { type: 'sine', vol: .16, att: .05 },
+  marimba: { vol: .09, dec: .32, parts: [[1, 1], [4, .22], [10, .05]] },
+  steel:   { vol: .08, dec: .45, parts: [[1, 1], [2, .35], [3, .12]] },
+  box:     { vol: .06, dec: .9, parts: [[1, 1], [3, .18], [5.4, .06]], echo: true },
+  flute:   { vol: .07, att: .04, parts: [[1, 1], [2, .08]], vib: 5 },
+  ep:      { vol: .07, dec: 1.1, parts: [[1, 1], [2, .18], [3, .05]], echo: true },
+  acc:     { vol: .026, att: .02, type: 'square', detune: 8, vib: 5 },
+  lead:    { vol: .03, dec: .28, type: 'square' },
+  pluck:   { vol: .03, dec: .16, parts: [[1, 1], [2, .3]] },
+  stab:    { vol: .018, dec: .12, type: 'square' },
+  bass:    { vol: .13, dec: .34, type: 'triangle' },
+  bassLong:{ vol: .12, att: .03, type: 'triangle' },
 };
+const Q = { M: [0, 4, 7], m: [0, 3, 7], 7: [0, 4, 7, 10], M7: [0, 4, 7, 11], m7: [0, 3, 7, 10] };
 const SONGS = {
-  z0: { bpm: 116, root: 60, steps: 8, chords: [0, -3, -7, -5], bass: [0, _, 7, _, 0, _, 7, 12], bassInst: INST.tri, lead: INST.sq,
-        mel: [7, _, 4, _, 7, 9, 7, _, 9, _, 12, _, 9, 7, 4, _, 5, _, 9, _, 12, _, 9, 7, 7, _, 11, _, 14, _, 12, _], drums: 'khshkhsh' },
-  z1: { bpm: 104, root: 65, steps: 8, chords: [0, 2, 4, 2], bass: [0, _, _, 7, _, 12, 7, _], bassInst: INST.tri, lead: INST.mar,
-        mel: [12, _, 7, 9, _, 12, _, 14, 14, _, 11, _, 9, _, 7, _, 16, _, 12, _, 9, 12, 16, _, 14, _, 11, 9, 7, _, _, _], drums: 'kx.xrx.x' },
-  z2: { bpm: 84, root: 57, steps: 8, chords: [0, -4, 3, -2], bass: [0, _, _, _, _, _, _, _], bassOct: -12, bassInst: INST.sub, lead: INST.bell, echo: .45,
-        mel: [24, _, _, _, _, _, _, _, 20, _, _, _, _, _, _, _, 19, _, _, _, _, _, _, _, 22, _, _, _, _, _, _, _],
-        arp: [12, 15, 19, 24, 19, 15, 12, 15, 8, 12, 15, 20, 15, 12, 8, 12, 15, 19, 22, 27, 22, 19, 15, 19, 10, 14, 17, 22, 17, 14, 10, 14], arpInst: INST.bell, drums: '..h...h.' },
-  z3: { bpm: 120, root: 62, steps: 6, chords: [0, -2, 0, -5], bass: [0, _, _, 7, _, _], bassInst: INST.tri, lead: INST.acc,
-        mel: [7, _, 7, 5, _, 3, 2, _, -2, 2, _, 5, 7, _, 10, 12, _, 10, 14, _, 11, 7, _, _], drums: 'k..r..' },
-  z4: { bpm: 132, root: 64, steps: 8, chords: [0, 1, 0, -2], bass: [0, 0, 12, 0, 0, 12, 0, 10], bassInst: INST.saw, lead: INST.sq,
-        mel: [12, _, _, 13, _, 12, _, 10, 13, _, _, 15, _, 13, _, 12, 12, _, 15, _, 17, _, 15, 13, 12, _, _, _, 7, _, 10, _], drums: 'khskkhsh' },
-  z5: { bpm: 68, root: 48, steps: 8, chords: [0, -2, -4, -5], bass: [0, _, _, _, _, _, _, _], bassOct: -12, bassInst: INST.sub, lead: INST.eerie, echo: .5,
-        mel: [_, _, 24, _, _, _, 27, _, _, _, 22, _, _, _, 26, _, _, _, 20, _, _, _, 24, _, _, _, 23, _, _, _, 19, _], drums: 'kK......' },
-  boss: { bpm: 152, root: 60, steps: 8, chords: [0, 0, -4, -2], bass: [0, 0, 12, 0, 0, 12, 0, 10], bassInst: INST.saw, lead: INST.sq,
-        mel: [12, _, 15, _, 12, _, 17, 15, 12, _, 15, _, 19, _, 17, 15, 8, _, 12, _, 15, _, 12, _, 10, _, 14, _, 17, _, 19, _], drums: 'khskkhsh' },
+  // 阳光浅滩: sunny C major, marimba over a walking bass, a little swing
+  z0: { bpm: 124, swing: .16, root: 60, lead: INST.marimba, bass: 'walk', comp: 'off', drums: 'Kwhwkwhw',
+        chords: [[0, 'M'], [-3, 'm'], [5, 'M'], [7, 'M'], [0, 'M'], [-3, 'm'], [2, 'm7'], [7, '7']],
+        mel: [7, _, 12, _, 16, 14, 12, _,   9, _, 12, _, 16, _, 14, 12,   9, _, 5, _, 9, 12, 14, _,   14, _, 11, _, 7, _, _, _,
+              7, _, 12, _, 16, 14, 12, _,   16, _, 19, _, 21, _, 19, 16,  17, _, 14, _, 12, 14, 17, _,   19, _, 17, 14, 11, _, 7, _] },
+  // 彩虹珊瑚礁: F major, steel-drum melody, shaker and offbeat plucks
+  z1: { bpm: 112, swing: .12, root: 65, lead: INST.steel, bass: 'walk', comp: 'off', drums: 'kx.xrx.x',
+        chords: [[0, 'M'], [-3, 'm'], [5, 'M'], [7, '7'], [0, 'M'], [-3, 'm'], [2, 'm7'], [7, '7']],
+        mel: [7, _, 9, 12, _, 9, 7, _,   9, _, 5, 9, _, 12, 14, _,   17, _, 16, 14, _, 12, 14, _,   16, _, 14, _, 12, _, 11, _,
+              12, _, 16, _, 19, _, 16, _,  21, _, 19, 16, _, 14, 16, _,  14, _, 17, _, 19, 17, 14, _,  16, _, _, 14, _, 11, 7, _] },
+  // 冰封海湾: music box arpeggios and a slow flute
+  z2: { bpm: 92, root: 57, lead: INST.flute, bass: 'long', comp: 'arp', compInst: INST.box, echo: .35, drums: '........',
+        chords: [[0, 'm'], [-4, 'M'], [3, 'M'], [-2, 'M'], [0, 'm'], [-4, 'M'], [5, 'm'], [7, '7']],
+        mel: [19, _, _, _, 17, _, 15, _,   17, _, _, _, 15, _, 12, _,   15, _, _, _, 19, _, 22, _,   22, _, _, _, _, _, _, _,
+              24, _, _, _, 22, _, 19, _,   20, _, 19, _, 17, _, 15, _,  17, _, _, _, 14, _, 12, _,   19, _, _, _, 23, _, _, _] },
+  // 沉船墓场: a jolly pirate shanty in 6/8 on accordion
+  z3: { bpm: 132, root: 62, steps: 6, lead: INST.acc, bass: 'waltz', comp: 'waltz', drums: 'K..r..',
+        chords: [[0, 'm'], [-2, 'M'], [-4, 'M'], [-5, '7'], [0, 'm'], [-2, 'M'], [5, 'm'], [7, '7']],
+        mel: [7, _, _, 12, _, 10,   14, _, 12, 10, _, 7,   12, _, _, 15, _, 12,   14, _, 11, 7, _, _,
+              7, _, _, 12, _, 15,   17, _, 15, 14, _, 12,  12, _, 15, 17, _, 15,  14, _, _, 11, _, _] },
+  // 熔岩热泉: bouncy and driving E minor
+  z4: { bpm: 140, root: 64, lead: INST.lead, bass: 'root8', comp: 'stab', drums: 'khskkhsh',
+        chords: [[0, 'm'], [-4, 'M'], [-2, 'M'], [0, 'm'], [0, 'm'], [-4, 'M'], [-2, 'M'], [-5, '7']],
+        mel: [12, _, 15, _, 19, _, 17, 15,   15, _, 12, _, 8, _, 10, 12,   14, _, 17, _, 22, _, 19, 17,   19, _, _, _, 12, _, _, _,
+              12, 12, 15, _, 19, 19, 22, _,  20, _, 19, _, 15, _, 12, _,  14, _, 17, _, 14, _, 10, _,  11, _, 14, _, 17, _, 19, _] },
+  // 无光深渊: soft electric piano, jazzy night chords, heartbeat kick
+  z5: { bpm: 80, swing: .1, root: 57, lead: INST.ep, bass: 'long', comp: 'arp', compInst: INST.pluck, echo: .4, drums: 'K...K...',
+        chords: [[0, 'm7'], [5, 'm7'], [-2, '7'], [3, 'M7'], [-4, 'M7'], [5, 'm7'], [7, '7'], [0, 'm']],
+        mel: [19, _, _, _, 17, _, 15, _,   17, _, _, _, 12, _, _, _,   14, _, 17, _, 20, _, 19, _,   19, _, _, _, _, _, _, _,
+              20, _, _, _, 19, _, 15, _,   17, _, 15, _, 12, _, _, _,  14, _, _, _, 11, _, _, _,   12, _, _, _, _, _, _, _] },
+  // 海怪战: upbeat, urgent but fun (transposed to the zone)
+  boss: { bpm: 160, root: 57, lead: INST.lead, bass: 'root8', comp: 'stab', drums: 'khskkhsh',
+        chords: [[0, 'm'], [-4, 'M'], [-2, 'M'], [0, 'm'], [0, 'm'], [-4, 'M'], [-2, 'M'], [7, '7']],
+        mel: [12, 12, 15, _, 19, _, 17, 15,   20, _, 19, _, 17, _, 15, _,   22, _, 19, _, 17, _, 14, _,   12, _, _, _, 24, _, _, _,
+              12, 12, 15, _, 19, _, 22, _,   24, _, 22, _, 20, _, 19, _,  17, _, 19, _, 22, _, 19, _,   19, _, 23, _, 26, _, _, _] },
 };
 const MUS = { cur: null, next: 0, step: 0, root: 60, bus: null, send: null };
 // Each track gets its own output (with its own echo). Switching tracks fades the old one out, which also
 // silences notes it had already scheduled ahead and its echo tail, so two songs never play together.
 function newTrackBus(echo) {
-  const bus = AC.createGain(), delay = AC.createDelay(1), fb = AC.createGain(), send = AC.createGain();
-  bus.gain.value = .55; bus.connect(AC.destination);
-  send.gain.value = echo || 0; delay.delayTime.value = .33; fb.gain.value = .38;
+  const bus = AC.createGain(), tone = AC.createBiquadFilter(), delay = AC.createDelay(1), fb = AC.createGain(), send = AC.createGain();
+  tone.type = 'lowpass'; tone.frequency.value = 3800; tone.Q.value = .3;
+  bus.gain.value = .6; bus.connect(tone); tone.connect(AC.destination);
+  send.gain.value = echo || 0; delay.delayTime.value = .36; fb.gain.value = .35;
   send.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(bus);
   return { bus, send };
 }
@@ -747,40 +774,61 @@ function dropTrackBus() {
 }
 document.addEventListener('visibilitychange', () => { try { if (!AC) return; if (document.hidden) AC.suspend(); else AC.resume(); } catch (e) {} });
 window.addEventListener('pagehide', () => { try { if (AC) AC.close(); } catch (e) {} });
-function mnote(midi, t, dur, inst) {
-  const f = 440 * Math.pow(2, (midi - 69) / 12), len = inst.dec || dur, env = AC.createGain();
-  env.gain.setValueAtTime(.0001, t); env.gain.linearRampToValueAtTime(inst.vol, t + (inst.att || .006));
-  env.gain.setValueAtTime(inst.vol, t + Math.max(inst.att || .006, len * .6)); env.gain.exponentialRampToValueAtTime(.0001, t + len);
+function mnote(midi, t, dur, inst, velo) {
+  const f = 440 * Math.pow(2, (midi - 69) / 12), len = inst.dec || dur, env = AC.createGain(), v = inst.vol * (velo || 1);
+  env.gain.setValueAtTime(.0001, t); env.gain.linearRampToValueAtTime(v, t + (inst.att || .005));
+  if (!inst.dec) env.gain.setValueAtTime(v, t + Math.max(inst.att || .005, len * .7));
+  env.gain.exponentialRampToValueAtTime(.0001, t + len);
   env.connect(MUS.bus); if (inst.echo) env.connect(MUS.send);
-  for (const det of inst.detune ? [0, inst.detune] : [0]) {
-    const o = AC.createOscillator(); o.type = inst.type; o.frequency.value = f; o.detune.value = det;
-    if (inst.vib) { const l = AC.createOscillator(), lg = AC.createGain(); l.frequency.value = inst.vib; lg.gain.value = f * .012; l.connect(lg); lg.connect(o.frequency); l.start(t); l.stop(t + len + .05); }
-    o.connect(env); o.start(t); o.stop(t + len + .05);
+  const voices = inst.parts || (inst.detune ? [[1, 1, 0], [1, 1, inst.detune]] : [[1, 1]]);
+  for (const [mult, amp, det] of voices) {
+    const o = AC.createOscillator(), pg = AC.createGain();
+    o.type = inst.parts ? 'sine' : (inst.type || 'sine'); o.frequency.value = f * mult; if (det) o.detune.value = det;
+    pg.gain.value = amp;
+    if (inst.vib && mult === 1) { const l = AC.createOscillator(), lg = AC.createGain(); l.frequency.value = inst.vib; lg.gain.value = f * .01; l.connect(lg); lg.connect(o.frequency); l.start(t); l.stop(t + len + .05); }
+    o.connect(pg); pg.connect(env); o.start(t); o.stop(t + len + .05);
   }
 }
 function mdrum(d, t) {
+  const out = MUS.bus;
   if (d === 'k' || d === 'K') {
     const o = AC.createOscillator(), e = AC.createGain();
-    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(42, t + .12);
-    e.gain.setValueAtTime(d === 'k' ? .3 : .15, t); e.gain.exponentialRampToValueAtTime(.0001, t + .16);
-    o.connect(e); e.connect(MUS.bus); o.start(t); o.stop(t + .18); return;
+    o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(45, t + .1);
+    e.gain.setValueAtTime(d === 'k' ? .22 : .12, t); e.gain.exponentialRampToValueAtTime(.0001, t + .14);
+    o.connect(e); e.connect(out); o.start(t); o.stop(t + .16); return;
   }
-  if (d === 'r') { const o = AC.createOscillator(), e = AC.createGain(); o.type = 'square'; o.frequency.value = 820; e.gain.setValueAtTime(.025, t); e.gain.exponentialRampToValueAtTime(.0001, t + .04); o.connect(e); e.connect(MUS.bus); o.start(t); o.stop(t + .05); return; }
+  if (d === 'w' || d === 'r') {
+    const o = AC.createOscillator(), e = AC.createGain(); o.type = d === 'w' ? 'sine' : 'triangle'; o.frequency.value = d === 'w' ? 1250 : 900;
+    e.gain.setValueAtTime(d === 'w' ? .04 : .03, t); e.gain.exponentialRampToValueAtTime(.0001, t + .045);
+    o.connect(e); e.connect(out); o.start(t); o.stop(t + .06); return;
+  }
   if (!NB) { NB = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const a = NB.getChannelData(0); for (let i = 0; i < a.length; i++) a[i] = Math.random() * 2 - 1; }
-  const [ft, fq, v, len] = { s: ['highpass', 1800, .08, .12], h: ['highpass', 7000, .02, .03], x: ['bandpass', 6000, .03, .05] }[d];
+  const [ft, fq, v, len] = { s: ['bandpass', 2200, .06, .12], h: ['highpass', 8000, .012, .03], x: ['bandpass', 6500, .02, .05] }[d];
   const s = AC.createBufferSource(), fl = AC.createBiquadFilter(), e = AC.createGain();
   s.buffer = NB; fl.type = ft; fl.frequency.value = fq; e.gain.setValueAtTime(v, t); e.gain.exponentialRampToValueAtTime(.0001, t + len);
-  s.connect(fl); fl.connect(e); e.connect(MUS.bus); s.start(t, Math.random()); s.stop(t + len + .02);
+  s.connect(fl); fl.connect(e); e.connect(out); s.start(t, Math.random()); s.stop(t + len + .02);
 }
 const holdLen = (arr, i) => { let c = 1; while (c < arr.length && arr[(i + c) % arr.length] === null) c++; return c; };
 function playStep(song, i, t, spb) {
-  const n = song.steps, bars = song.chords.length, k = i % (n * bars), bar = Math.floor(k / n), s = k % n, root = MUS.root;
-  const b = song.bass[s];
-  if (b !== null) mnote(root + (song.bassOct || -24) + song.chords[bar] + b, t, spb * holdLen(song.bass, s) * .95, song.bassInst);
+  const n = song.steps || 8, bars = song.chords.length, k = i % (n * bars), bar = Math.floor(k / n), s = k % n, root = MUS.root;
+  const [off, q] = song.chords[bar], tones = Q[q], cr = root + off, next = song.chords[(bar + 1) % bars][0];
+  // bass
+  const B0 = cr - 24;
+  if (song.bass === 'walk' && s % 2 === 0) {
+    const walk = [0, tones[1], 7, (next - off) + (next > off ? -1 : 1)];
+    mnote(B0 + walk[s / 2], t, spb * 2, INST.bass);
+  } else if (song.bass === 'root8') mnote(B0 + (s === 2 || s === 6 ? 12 : 0), t, spb, INST.bass, s % 2 ? .75 : 1);
+  else if (song.bass === 'waltz' && (s === 0 || s === 3)) mnote(B0 + (s ? 7 : 0), t, spb * 2, INST.bass);
+  else if (song.bass === 'long' && s === 0) mnote(B0 + 12, t, spb * n * .95, INST.bassLong);
+  // comping from the chord
+  if (song.comp === 'off' && s % 2 === 1) tones.slice(0, 3).forEach(iv => mnote(cr + iv, t, spb, INST.pluck, .8));
+  else if (song.comp === 'stab' && s % 2 === 1) tones.slice(0, 3).forEach(iv => mnote(cr + iv, t, spb, INST.stab));
+  else if (song.comp === 'waltz' && (s === 2 || s === 5)) tones.slice(0, 3).forEach(iv => mnote(cr + iv, t, spb, INST.pluck, .8));
+  else if (song.comp === 'arp') { const seq = [0, 1, 2, 3, 2, 1, 0, 2], j = seq[s], iv = tones[j % tones.length] + (j >= tones.length ? 12 : 0); mnote(cr + 12 + iv, t, spb * 2, song.compInst || INST.box, .7); }
+  // melody
   const m = song.mel[k];
-  if (m !== null) mnote(root + m, t, spb * holdLen(song.mel, k) * .9, song.lead);
-  if (song.arp && song.arp[k] !== null) mnote(root + song.arp[k], t, spb * .9, song.arpInst);
-  const d = song.drums[s]; if (d !== '.') mdrum(d, t);
+  if (m !== null) mnote(root + m, t, spb * holdLen(song.mel, k) * .92, song.lead);
+  const d = song.drums[s]; if (d && d !== '.') mdrum(d, t);
 }
 function wantedTrack() {
   if (state === 'over' || state === 'win' || state === 'trans') return null;
@@ -796,14 +844,18 @@ function musicUpdate() {
     MUS.cur = want; MUS.step = 0; MUS.next = now + .12;
     if (want) {
       const zr = SONGS['z' + curZone()].root;
-      MUS.root = want === 'boss' ? (zr < 55 ? zr + 12 : zr) : SONGS[want].root;
+      MUS.root = want === 'boss' ? 57 + (zr - 57) % 6 : SONGS[want].root;
       Object.assign(MUS, newTrackBus(SONGS[want].echo));
     }
   }
   if (!MUS.cur) return;
   const song = SONGS[MUS.cur], spb = 60 / song.bpm / 2;
   if (MUS.next < now - .1) MUS.next = now + .05; // tab was hidden: skip rather than burst
-  while (MUS.next < now + .25) { try { playStep(song, MUS.step, MUS.next, spb); } catch (e) {} MUS.next += spb; MUS.step++; }
+  while (MUS.next < now + .25) {
+    const sw = MUS.step % 2 ? (song.swing || 0) * spb : 0; // shuffle: late offbeats
+    try { playStep(song, MUS.step, MUS.next + sw, spb); } catch (e) {}
+    MUS.next += spb; MUS.step++;
+  }
 }
 
 // ============================================================ game state
@@ -1041,7 +1093,7 @@ function actorTimers(A, dt, tele, dashDur, calmDur) {
   if (A.stun > 0) { A.stun -= dt; if (A.state !== 'calm') { A.state = 'calm'; A.timer = calmDur(); A.erupt = false; } return; }
   A.timer -= dt; if (A.timer > 0) return;
   if (A.state === 'calm') { A.state = 'tele'; A.timer = tele; SFX.tele(); vib(35); if (A.onTele) A.onTele(); }
-  else if (A.state === 'tele') { A.state = 'dash'; A.timer = dashDur() * run.slow * (A.erupt ? 1.5 : 1); A.dir = Math.random() < .5 ? -1 : 1; SFX.dash(); shake = Math.max(shake, A.erupt ? 5 : 1.5); }
+  else if (A.state === 'tele') { A.state = 'dash'; A.timer = dashDur() * run.slow * (A.erupt ? 1.5 : 1); A.dir = Math.random() < .5 ? -1 : 1; SFX.dash(); shake = Math.max(shake, A.erupt ? 3 : 1); }
   else {
     A.erupt = false;
     if (A.double && !A.combo) { A.combo = 1; A.state = 'calm'; A.timer = .4; return; }
@@ -1069,7 +1121,7 @@ function tensionStep(A, dt, reel) {
     prog = dashing ? -A.spd * dt : -8 * dt;
   }
   if (dashing) {
-    shake = Math.max(shake, hold ? 1.2 + tension / 35 : .8);
+    shake = Math.max(shake, hold ? .6 + tension / 90 : .3);
     if (hold) { A.vibT = (A.vibT || 0) - dt; if (A.vibT <= 0) { A.vibT = .22; vib(35); } }
   } else if (hold && !(A.stun > 0) && Math.random() < dt * 7) part({ x: A.px + rand(-6, 6), y: A.py + rand(-4, 2), vy: -rand(15, 30), life: .5, col: '#9dff9d' });
   if (hold && tension > 65) { warnT -= dt; if (warnT <= 0) { warnT = .18; SFX.warn(); vib(15); } }
@@ -1167,7 +1219,7 @@ function startBoss() {
 }
 function updWarn() {
   const u = Math.min(1, st / 1), e = 1 - (1 - u) * (1 - u);
-  B.y = lerp(380, B.d.y0, e); shake = Math.max(shake, 1.2);
+  B.y = lerp(380, B.d.y0, e); shake = Math.max(shake, .8);
   bossAttach();
   if (st > 1.3) { tension = 15; B.frenzy = run.fever; go('boss'); SFX.hook(); vib(40); pop('咬钩了!', 90, 120, '#ffe14a', 12, 1); }
 }
@@ -1638,7 +1690,7 @@ function drawOverlay(z) {
     txt('钓到 ' + run.fishTotal + ' 条鱼' + (run.continues ? ' · 续关 ' + run.continues + ' 次' : ''), 90, 132, 9, dark, 'center', null);
     txt('金币 ' + run.coins, 90, 146, 9, '#9a6a00', 'center', null);
     txt('到达 ' + ZONES[run.zone].name, 90, 160, 9, dark, 'center', null);
-    txt(run.newBest ? '新纪录!' : '最高纪录 ' + best, 90, 177, 9, run.newBest ? '#c0392b' : '#8a6a4a', 'center', null);
+    txt((run.newBest ? '新纪录!  ' : '') + '钱包 ' + WALLET.coins + ' 金币', 90, 177, 9, run.newBest ? '#c0392b' : '#8a6a4a', 'center', null);
     if (st > .5) {
       if (!win) button(BTN.cont, '从 ' + ZONES[run.zone].name + ' 继续');
       button(BTN.again, win ? '再来一次' : '从头开始'); button(BTN.overDex, '图鉴'); button(BTN.overShop, '商店');
@@ -1794,7 +1846,7 @@ function render() {
 
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false; ctx.globalAlpha = 1;
   ctx.fillStyle = '#0b1020'; ctx.fillRect(0, 0, cv.width, cv.height);
-  const sx = shake > 0 ? R((Math.random() - .5) * shake * 2) : 0, sy = shake > 0 ? R((Math.random() - .5) * shake * 2) : 0;
+  const amp = Math.min(shake, 4) * .6, sx = amp > 0 ? R(Math.sin(T * 38) * amp) : 0, sy = amp > 0 ? R(Math.cos(T * 31) * amp) : 0;
   ctx.drawImage(low, 0, 0, W, H, sx * K, sy * K, W * K, H * K);
   for (const t of TQ) {
     const c = textSprite(t), tw = c.w - 2 * c.pad;
