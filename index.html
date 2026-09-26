@@ -857,7 +857,18 @@ const CS = W / CW2; // café pixel -> game pixel
 const isoPt = (i, j) => [ISO.ox + (i - j) * 16, ISO.oy + (i + j) * 8];
 const isoC = (i, j) => isoPt(i + .5, j + .5);
 const TABLES = [[3, 3], [5, 3], [3, 5], [5, 5], [6.8, 4.2]];
-const DOOR = isoPt(8.3, 7.4), OUTSIDE = isoPt(10.6, 7.6);
+const DOOR = isoPt(8.3, 7.4), LANE = isoPt(10.9, 6.6), WALK = isoPt(7.6, 8.9), GATE = isoPt(12.9, 3.2);
+// terrace: sun loungers along the front, benches on the right; guests rest here after eating
+const REST = [
+  { t: 'lounge', i: 1.5, j: 9.8, c: '#3a78ff' }, { t: 'lounge', i: 3.7, j: 9.8, c: '#e8453c' }, { t: 'lounge', i: 5.9, j: 9.8, c: '#ffc83a' },
+  { t: 'bench', i: 9.1, j: 2.6 }, { t: 'bench', i: 9.1, j: 4.8 },
+];
+const restPos = r => r.t === 'lounge' ? isoPt(r.i + .7, r.j + .3) : isoPt(r.i + .28, r.j + .6);
+const restPath = (r, leaving) => r.t === 'lounge' ? (leaving ? [WALK, LANE, GATE] : [DOOR, WALK, restPos(r)]) : (leaving ? [LANE, GATE] : [DOOR, LANE, restPos(r)]);
+function freeRest() {
+  const busy = cafe.cust.filter(c => c.rest != null && c.rest >= 0).map(c => c.rest), free = REST.map((_, i) => i).filter(i => !busy.includes(i));
+  return free.length ? pick(free) : -1;
+}
 function tankFish() {
   const score = k => (DEX.fish[k].shiny ? 4 : 0) + (DEX.fish[k].gold ? 2 : 0);
   return FISH_ORDER.filter(k => DEX.fish[k]).sort((a, b) => score(b) - score(a));
@@ -876,18 +887,24 @@ function nextDish() {
   CAFE.sold[k] = (CAFE.sold[k] || 0) + 1;
   return { k, price: d.price * (prem ? 2 : 1), prem };
 }
-function openCafe(from) { cafe.back = from; cafe.cust = []; cafe.svc = false; cafe.detail = null; cafe.prev = null; cafe.sheet = totalStock() ? 0 : null; go('cafe'); SFX.click(); }
+function openCafe(from) {
+  cafe.back = from; cafe.cust = []; cafe.svc = false; cafe.detail = null; cafe.prev = null; cafe.sheet = totalStock() ? 0 : null;
+  // a couple of regulars are always lounging on the terrace
+  for (let k = 0; k < 2; k++) { const r = freeRest(), [x, y] = restPos(REST[r]); cafe.cust.push({ look: newGuestLook(), ph: 'rest', rest: r, t: rand(0, 3), restDur: 1e9, x, y, path: [] }); }
+  go('cafe'); SFX.click();
+}
 function updCafe(dt) {
   cafe.chefT = Math.max(0, cafe.chefT - dt);
-  if (!cafe.svc) return;
-  cafe.spawnT -= dt;
-  const n = seatCount(), used = cafe.cust.map(c => c.seat);
-  if (cafe.spawnT <= 0 && cafe.cust.length < n) {
-    const d = nextDish();
-    if (d) {
-      let seat = 0; while (used.includes(seat)) seat++;
-      cafe.cust.push({ seat, look: newGuestLook(), t: 0, ph: 'in', d, x: OUTSIDE[0], y: OUTSIDE[1], path: [DOOR, seatPos(seat)] });
-      cafe.spawnT = arriveGap(); saveCafe();
+  const n = seatCount(), dining = cafe.cust.filter(c => c.ph === 'in' || c.ph === 'eat'), used = dining.map(c => c.seat);
+  if (cafe.svc) {
+    cafe.spawnT -= dt;
+    if (cafe.spawnT <= 0 && dining.length < n) {
+      const d = nextDish();
+      if (d) {
+        let seat = 0; while (used.includes(seat)) seat++;
+        cafe.cust.push({ seat, look: newGuestLook(), t: 0, ph: 'in', d, x: GATE[0], y: GATE[1], path: [LANE, DOOR, seatPos(seat)] });
+        cafe.spawnT = arriveGap(); saveCafe();
+      }
     }
   }
   for (let i = cafe.cust.length - 1; i >= 0; i--) {
@@ -897,8 +914,15 @@ function updCafe(dt) {
         const mult = decoItem('stove', CAFE.deco.eq.stove).mult * (c.look.size === 'l' ? 1.3 : 1);
         const v = R(c.d.price * mult); earn(v); cafe.earned += v;
         pop('+' + v, c.x * CS, c.y * CS - 22, '#ffe14a', 9, .9); SFX.coin();
-        c.ph = 'out'; c.path = [DOOR, OUTSIDE]; c.heart = 1;
+        c.heart = 1; c.seat = -1;
+        const r = freeRest();
+        if (r >= 0 && Math.random() < .85) { c.ph = 'toRest'; c.rest = r; c.path = restPath(REST[r], false); }
+        else { c.ph = 'out'; c.path = [DOOR, LANE, GATE]; }
       }
+      continue;
+    }
+    if (c.ph === 'rest') {
+      if (c.t > c.restDur) { c.ph = 'out'; c.path = restPath(REST[c.rest], true); c.rest = -1; }
       continue;
     }
     // walk along the path
@@ -909,10 +933,11 @@ function updCafe(dt) {
     }
     if (!c.path.length) {
       if (c.ph === 'in') { c.ph = 'eat'; c.t = 0; cafe.chefT = .5; }
+      else if (c.ph === 'toRest') { c.ph = 'rest'; c.t = 0; c.restDur = rand(6, 10); c.heart = 1; }
       else cafe.cust.splice(i, 1);
     }
   }
-  if (!cafe.cust.length && totalStock() === 0) { cafe.svc = false; saveCafe(); pop('打烊啦! +' + cafe.earned, 90, 60, '#ffe14a', 12, 2); SFX.caught(); }
+  if (cafe.svc && !cafe.cust.some(c => c.ph === 'in' || c.ph === 'eat') && totalStock() === 0) { cafe.svc = false; saveCafe(); pop('打烊啦! +' + cafe.earned, 90, 60, '#ffe14a', 12, 2); SFX.caught(); }
 }
 
 // ---------- full-body cat guests (walk frames 1/2, stand 0)
@@ -972,6 +997,17 @@ function isoBox(i0, j0, i1, j1, h, top, left, right, lift) {
   [x3, x1].forEach(x => { const yy = x === x3 ? y3 : y1; g.fillStyle = mixHex(x === x3 ? left : right, OUT, .65); g.fillRect(R(x) - 1, R(yy - lift - h), 1, R(h) + 1); });
   if (h > 2) { g.fillStyle = shade(left, 25); g.fillRect(R(x2), R(y2 - lift - h), 1, R(h)); }
 }
+// chair whose seat centre sits above (sx, sy); the backrest runs along the back-left edge
+function drawChair(sx, sy) {
+  softShadow(sx, sy, 8);
+  g.fillStyle = '#6b3f1f'; [[-6, 0], [6, 0], [0, 3]].forEach(([dx, dy]) => g.fillRect(R(sx + dx), R(sy - 7 + dy), 1, 7 - dy));
+  for (let x = -7; x <= 0; x++) {
+    const yb = sy - 7 - (x + 7) * .5;
+    g.fillStyle = x === -7 || x === 0 ? mixHex('#a86a32', OUT, .6) : (x === -6 ? '#c98a52' : '#a86a32'); g.fillRect(R(sx + x), R(yb - 14), 1, 14);
+    g.fillStyle = mixHex('#a86a32', OUT, .6); g.fillRect(R(sx + x), R(yb - 15), 1, 1); if (x > -6 && x < -1) { g.fillStyle = '#8a5428'; g.fillRect(R(sx + x), R(yb - 9), 1, 1); }
+  }
+  diamondC(sx, sy - 6, 8, 4, mixHex('#8a5428', OUT, .6)); diamondC(sx, sy - 7, 7, 3.5, '#8a5428'); diamondC(sx, sy - 8, 6, 3, '#c0392b'); diamondC(sx - 1, sy - 9, 3, 1.5, '#e05a50');
+}
 function softShadow(x, y, hw) { g.globalAlpha = .2; diamondC(x, y, R(hw), Math.max(1, R(hw / 2)), '#2a1a10'); g.globalAlpha = 1; }
 const napCat = () => art('napcat', () => paint(24, 16, G => {
   G.ell(12, 12, 11, 3.5, '#c0392b'); G.ell(12, 11, 10, 2.8, '#e05a50');
@@ -1006,9 +1042,10 @@ function cafeBg(wall, floor) {
   g.fillStyle = '#e6fbff'; for (let i = 0; i < 60; i++) g.fillRect((i * 97) % CW2, 104 + (i * 53) % 400, 5 + i % 4, 1);
   const n = ISO.n;
   // pier posts, deck, planks
-  for (let k = -2; k <= n + 2; k += 2) { const [px, py] = isoPt(k, n + 3); g.fillStyle = OUT; g.fillRect(R(px) - 3, R(py + 14), 6, 34); g.fillStyle = '#5a3418'; g.fillRect(R(px) - 2, R(py + 14), 4, 34); }
-  isoBox(-2, -1, n + 2, n + 3, 10, '#c49464', '#7a4a28', '#5a3418', -16);
-  for (let j = -1; j < n + 3; j += .5) { const [ax, ay] = isoPt(-2, j), [bx, by] = isoPt(n + 2, j); pline(ax, ay + 6, bx, by + 6, '#a87a4a'); }
+  const E = n + 5;
+  for (let k = -2; k <= E; k += 2) [isoPt(k, E), isoPt(E, k)].forEach(([px, py]) => { g.fillStyle = OUT; g.fillRect(R(px) - 3, R(py + 14), 6, 40); g.fillStyle = '#5a3418'; g.fillRect(R(px) - 2, R(py + 14), 4, 40); });
+  isoBox(-2, -1, E, E, 10, '#c49464', '#7a4a28', '#5a3418', -16);
+  for (let j = -1; j < E; j += .5) { const [ax, ay] = isoPt(-2, j), [bx, by] = isoPt(E, j); pline(ax, ay + 6, bx, by + 6, (j * 2) % 3 ? '#a87a4a' : '#b8845a'); }
   // room floor
   isoBox(0, 0, n, n, 6, '#b98a5a', '#8a5428', '#6b3f1f', -6);
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
@@ -1072,19 +1109,21 @@ function cafeBg(wall, floor) {
   { const [cx, cy] = isoPt(0, 7.5), y = R(cy) - 76; disc(cx, y, 6, '#6b3f1f'); disc(cx, y, 5, '#fbfbf6'); g.fillStyle = OUT; g.fillRect(R(cx), y - 4, 1, 4); g.fillRect(R(cx), y, 3, 1); }
   // pier railing along the front edges
   const rail = [];
-  for (let i = -2; i <= n + 2; i += 1.5) rail.push(isoPt(i, n + 3));
-  for (let k = 0; k < rail.length - 1; k++) { const [ax, ay] = rail[k], [bx, by] = rail[k + 1]; pcurve(ax, ay - 2, (ax + bx) / 2, (ay + by) / 2 + 1, bx, by - 2, '#e8d8a0'); }
+  for (let i = -2; i <= E; i += 1.5) rail.push([isoPt(i, E), 1]);
+  for (let j = E - 1.5; j >= -1; j -= 1.5) rail.push([isoPt(E, j), j > 5 || j < 1.5 ? 1 : 0]);
+  for (let k = 0; k < rail.length - 1; k++) { if (!rail[k][1] || !rail[k + 1][1]) continue; const [ax, ay] = rail[k][0], [bx, by] = rail[k + 1][0]; pcurve(ax, ay - 2, (ax + bx) / 2, (ay + by) / 2 + 1, bx, by - 2, '#e8d8a0'); }
+  for (let k = 0; k < rail.length; k++) rail[k] = rail[k][0];
   rail.forEach(([x, y]) => { g.fillStyle = OUT; g.fillRect(R(x) - 2, R(y) - 6, 4, 13); g.fillStyle = '#8a5428'; g.fillRect(R(x) - 1, R(y) - 5, 2, 11); g.fillStyle = '#c98a52'; g.fillRect(R(x) - 1, R(y) - 5, 2, 1); });
   // life ring, flower pots and the menu board by the door
-  { const [rx2, ry2] = isoC(n + .9, -.4); disc(rx2, ry2 - 16, 8, OUT); disc(rx2, ry2 - 16, 7, '#ff6a3a'); disc(rx2, ry2 - 16, 3.6, OUT); disc(rx2, ry2 - 16, 2.6, '#46bcd0');
+  { const [rx2, ry2] = isoPt(E, 6.5); disc(rx2, ry2 - 16, 8, OUT); disc(rx2, ry2 - 16, 7, '#ff6a3a'); disc(rx2, ry2 - 16, 3.6, OUT); disc(rx2, ry2 - 16, 2.6, '#46bcd0');
     g.fillStyle = '#ffffff'; [[-6, 0], [5, 0], [0, -6], [0, 5]].forEach(([dx, dy]) => g.fillRect(R(rx2 + dx), R(ry2 - 16 + dy), 2, 2)); }
-  [[n + .8, 5.1], [n + 1.6, 8.9]].forEach(([i, j], k) => { const [fx, fy] = isoC(i, j); g.fillStyle = OUT; g.fillRect(R(fx) - 6, R(fy) - 11, 12, 11); g.fillStyle = '#c0703a'; g.fillRect(R(fx) - 5, R(fy) - 10, 10, 9); g.fillStyle = '#e08a50'; g.fillRect(R(fx) - 5, R(fy) - 10, 10, 2);
+  [[n + .3, 5.9], [n + .3, 8.4]].forEach(([i, j], k) => { const [fx, fy] = isoC(i, j); g.fillStyle = OUT; g.fillRect(R(fx) - 6, R(fy) - 11, 12, 11); g.fillStyle = '#c0703a'; g.fillRect(R(fx) - 5, R(fy) - 10, 10, 9); g.fillStyle = '#e08a50'; g.fillRect(R(fx) - 5, R(fy) - 10, 10, 2);
     [[-3, -14], [2, -16], [0, -12], [4, -12], [-4, -11]].forEach(([dx, dy], q) => { disc(fx + dx, fy + dy, 2.2, '#2e8a47'); if (q < 3) { g.fillStyle = k ? '#ffc83a' : '#ff6fae'; g.fillRect(R(fx + dx), R(fy + dy) - 1, 2, 2); } }); });
-  { const [mx, my] = isoC(n + 1.4, 6.1); g.fillStyle = OUT; g.fillRect(R(mx) - 9, R(my) - 22, 18, 16); g.fillStyle = '#8a5428'; g.fillRect(R(mx) - 8, R(my) - 21, 16, 14); g.fillStyle = '#2e4a3a'; g.fillRect(R(mx) - 7, R(my) - 20, 14, 12);
+  { const [mx, my] = isoC(n + 1.5, 8.2); g.fillStyle = OUT; g.fillRect(R(mx) - 9, R(my) - 22, 18, 16); g.fillStyle = '#8a5428'; g.fillRect(R(mx) - 8, R(my) - 21, 16, 14); g.fillStyle = '#2e4a3a'; g.fillRect(R(mx) - 7, R(my) - 20, 14, 12);
     g.fillStyle = '#fbfbf6'; g.fillRect(R(mx) - 5, R(my) - 18, 8, 1); g.fillRect(R(mx) - 5, R(my) - 15, 10, 1); g.fillRect(R(mx) - 5, R(my) - 12, 6, 1); g.fillStyle = '#ffc83a'; g.fillRect(R(mx) + 3, R(my) - 19, 2, 2);
     g.fillStyle = OUT; g.fillRect(R(mx) - 8, R(my) - 6, 2, 6); g.fillRect(R(mx) + 6, R(my) - 6, 2, 6); }
   // outside: barrels and a lamp post on the pier
-  [[-1.2, 5], [-1.2, 6.1], [9.2, 1.2]].forEach(([i, j]) => { const [bx, by] = isoC(i, j); g.fillStyle = OUT; g.fillRect(R(bx) - 7, R(by) - 18, 14, 18); g.fillStyle = '#8a5a30'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 16); g.fillStyle = '#5a3418'; g.fillRect(R(bx) - 6, R(by) - 13, 12, 2); g.fillRect(R(bx) - 6, R(by) - 6, 12, 2); g.fillStyle = '#a8703a'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 2); });
+  [[-1.2, 5], [-1.2, 6.1], [E - 1.2, 9.5], [E - 1.2, 10.6]].forEach(([i, j]) => { const [bx, by] = isoC(i, j); g.fillStyle = OUT; g.fillRect(R(bx) - 7, R(by) - 18, 14, 18); g.fillStyle = '#8a5a30'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 16); g.fillStyle = '#5a3418'; g.fillRect(R(bx) - 6, R(by) - 13, 12, 2); g.fillRect(R(bx) - 6, R(by) - 6, 12, 2); g.fillStyle = '#a8703a'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 2); });
   g = keep;
   return (CAFE_BG[key] = c);
 }
@@ -1113,18 +1152,19 @@ function drawCafeIso(eq) {
   // aquarium against the right wall
   if (eq.tank !== 'none') {
     const big = eq.tank === 'big';
-    L.push({ y: isoPt(big ? 5 : 5, 1)[1], f: () => {
+    L.push({ y: isoPt(big ? 5.2 : 5, 1)[1], f: () => {
       if (big) {
-        isoBox(3, 0, 5, 1, 8, '#8a5428', '#6b3f1f', '#5a3418');
-        isoBox(3, 0, 5, 1, 30, '#8fe0f0', '#5ec8e0', '#46b0d0', 8);
-        const [ax, ay] = isoPt(3, 1), [bx, by] = isoPt(5, 1);
+        isoBox(2, 0, 5.2, 1, 8, '#8a5428', '#6b3f1f', '#5a3418');
+        isoBox(2, 0, 5.2, 1, 40, '#8fe0f0', '#5ec8e0', '#46b0d0', 8);
+        const [ax, ay] = isoPt(2, 1), [bx, by] = isoPt(5.2, 1);
         for (let x = R(ax) + 1; x < bx; x++) { const yb = ay + (by - ay) * (x - ax) / (bx - ax) - 8; g.fillStyle = '#e8d8a0'; g.fillRect(x, R(yb) - 4, 1, 4); if (x % 7 === 0) { g.fillStyle = '#3fae5a'; for (let k = 0; k < 9; k++) g.fillRect(x + R(Math.sin(T * 2 + k * .5 + x)), R(yb) - 5 - k, 1, 1); } }
-        tankFish().filter(k => SPR[k].w <= 22 && SPR[k].h <= 12).slice(0, 4).forEach((k, i) => {
-          const S = SPR[k], sc = 1, fw = S.w * sc, fh = S.h * sc, u0 = (T * .12 + i * .31) % 2, u = u0 < 1 ? u0 : 2 - u0, dir = u0 < 1 ? 1 : -1;
-          const x = ax + 2 + (bx - ax - 4 - fw) * u, yb = ay + (by - ay) * ((x - ax) / (bx - ax)) - 8, y = yb - 8 - (i * 5) % 18 - fh + Math.sin(T * 2 + i);
+        tankFish().filter(k => SPR[k].w <= 30 && SPR[k].h <= 14).slice(0, 4).forEach((k, i) => {
+          const S = SPR[k], sc = 1, fw = S.w * sc, fh = S.h * sc, sp = .25 + i * .07, u = (Math.sin(T * sp + i * 1.7) + 1) / 2, dir = Math.cos(T * sp + i * 1.7) > 0 ? 1 : -1;
+          const x = ax + 2 + (bx - ax - 4 - fw) * u, yb = ay + (by - ay) * ((x + fw / 2 - ax) / (bx - ax)) - 8, y = yb - 6 - i * 8 - fh + Math.sin(T * 2 + i);
           g.drawImage(DEX.fish[k].shiny ? (dir > 0 ? S.gr : S.gl) : (dir > 0 ? S.r : S.l), R(x), R(y), R(fw), R(fh));
         });
-        g.globalAlpha = .3; g.fillStyle = '#ffffff'; g.fillRect(R(ax) + 3, R(ay) - 34, 1, 20); g.globalAlpha = 1;
+        g.fillStyle = '#e8fbff'; for (let q = 0; q < 4; q++) { const u = (T * .45 + q / 4) % 1; g.fillRect(R(ax + 8 + q * 12 + Math.sin(T * 3 + q)), R(ay + q * 2 - 12 - u * 32), 1, 1); }
+        g.globalAlpha = .3; g.fillStyle = '#ffffff'; g.fillRect(R(ax) + 3, R(ay) - 44, 1, 26); g.fillRect(R(ax) + 5, R(ay) - 43, 1, 10); g.globalAlpha = 1;
       } else {
         isoBox(4, 0, 5, 1, 16, '#a86a32', '#8a5428', '#6b3f1f');
         const [cx, cy] = isoC(4, .5), by = cy - 16 - 9;
@@ -1145,7 +1185,7 @@ function drawCafeIso(eq) {
   // tables, chairs, guests
   for (let k = 0; k < n; k++) {
     const [cx, cy] = isoC(...TABLES[k]);
-    L.push({ y: cy - 5.2, f: () => { diamondC(cx - 9, cy - 11, 7, 3.5, OUT); diamondC(cx - 9, cy - 12, 6, 3, '#c0392b'); g.fillStyle = OUT; g.fillRect(R(cx) - 16, R(cy) - 26, 2, 16); g.fillStyle = '#8a5428'; g.fillRect(R(cx) - 15, R(cy) - 25, 1, 14); } });
+    L.push({ y: cy - 5.2, f: () => drawChair(cx - 9, cy - 5) });
     L.push({ y: cy + 1, f: () => {
       softShadow(cx + 2, cy, 12);
       g.fillStyle = OUT; g.fillRect(R(cx) + 1, R(cy) - 9, 3, 9); g.fillStyle = '#6b3f1f'; g.fillRect(R(cx) + 2, R(cy) - 9, 1, 8);
@@ -1155,17 +1195,40 @@ function drawCafeIso(eq) {
     } });
   }
   for (const c of cafe.cust) {
-    const sitting = c.ph === 'eat', fr = sitting ? 0 : 1 + Math.floor(c.t * 6) % 2, b = guestBody(c.look, fr), img = (c.face || -1) > 0 ? b.f : b.c;
-    const bob = sitting ? R(Math.abs(Math.sin(c.t * 7))) : (fr === 2 ? 1 : 0), top = R(c.y) - img.height + (sitting ? -4 : 0) - bob;
-    L.push({ y: c.y + (sitting ? 0 : .5), f: () => {
+    const sitting = c.ph === 'eat' || c.ph === 'rest', fr = sitting ? 0 : 1 + Math.floor(c.t * 6) % 2, b = guestBody(c.look, fr), img = (c.face || -1) > 0 ? b.f : b.c;
+    const lift = c.ph === 'eat' ? 7 : c.ph === 'rest' ? (REST[c.rest].t === 'lounge' ? 6 : 7) : 0;
+    const bob = c.ph === 'eat' ? R(Math.abs(Math.sin(c.t * 7))) : c.ph === 'rest' ? R(Math.sin(c.t * 1.5) * .6 + .4) : (fr === 2 ? 1 : 0), top = R(c.y) - img.height - lift - bob;
+    L.push({ y: c.y + (sitting ? .1 : .5), f: () => {
       if (!sitting) softShadow(c.x, c.y, img.width / 2.4);
       g.drawImage(img, R(c.x) - b.cx, top);
       if (c.heart > 0) { const hy = top - 6 - R((1 - c.heart) * 10), hx = R(c.x) - 3; g.globalAlpha = Math.min(1, c.heart * 2); g.fillStyle = OUT; g.fillRect(hx - 1, hy - 1, 9, 7); g.fillStyle = '#ff4d6d'; g.fillRect(hx, hy, 3, 2); g.fillRect(hx + 4, hy, 3, 2); g.fillRect(hx, hy + 2, 7, 1); g.fillRect(hx + 1, hy + 3, 5, 1); g.fillRect(hx + 2, hy + 4, 3, 1); g.fillStyle = '#ffd0da'; g.fillRect(hx + 1, hy, 1, 1); g.globalAlpha = 1; }
     } });
   }
+  REST.forEach(r => {
+    const [bx, by] = r.t === 'lounge' ? isoPt(r.i + 1.5, r.j + .6) : isoPt(r.i + .45, r.j + 1.2);
+    L.push({ y: by - 1, f: () => {
+      if (r.t === 'lounge') {
+        softShadow(...isoPt(r.i + .75, r.j + .3), 16);
+        isoBox(r.i, r.j, r.i + 1.5, r.j + .6, 3, '#e8e0d0', '#a86a32', '#8a5428', 3);
+        for (let k = 0; k < 4; k++) isoBox(r.i + .35 + k * .29, r.j + .05, r.i + .35 + (k + 1) * .29, r.j + .55, 1, k % 2 ? '#fbfbf6' : r.c, '#e0d8c8', '#d0c8b8', 6);
+        isoBox(r.i, r.j, r.i + .35, r.j + .6, 9, shade(r.c, 20), r.c, shade(r.c, -25), 6);
+      } else {
+        softShadow(...isoPt(r.i + .25, r.j + .6), 12);
+        isoBox(r.i, r.j, r.i + .12, r.j + 1.2, 18, '#c98a52', '#a86a32', '#8a5428');
+        isoBox(r.i, r.j, r.i + .45, r.j + 1.2, 7, '#d9a06a', '#a86a32', '#8a5428');
+      }
+    } });
+  });
   // cat napping on a cushion by the left wall
   { const [nx, ny] = isoC(.3, 6.4); L.push({ y: ny, f: () => { softShadow(nx, ny, 12); g.drawImage(napCat(), R(nx) - 12, R(ny) - 14); const z = (T * .6) % 1; g.globalAlpha = 1 - z; g.fillStyle = '#ffffff'; const zx = R(nx) + 4 + R(z * 6), zy = R(ny) - 18 - R(z * 12); g.fillRect(zx, zy, 4, 1); g.fillRect(zx + 2, zy + 1, 1, 1); g.fillRect(zx + 1, zy + 2, 1, 1); g.fillRect(zx, zy + 3, 4, 1); g.globalAlpha = 1; } }); }
   L.sort((a, b) => a.y - b.y).forEach(o => o.f());
+  // parasols beside the loungers
+  REST.filter(r => r.t === 'lounge').forEach(r => {
+    const [px, py] = isoPt(r.i + 1.9, r.j + .1), top = py - 48;
+    g.fillStyle = OUT; g.fillRect(R(px) - 1, R(top), 3, 48); g.fillStyle = '#fbfbf6'; g.fillRect(R(px), R(top), 1, 47);
+    diamondC(px, top, 14, 7, mixHex(r.c, OUT, .6)); diamondC(px, top - 1, 13, 6.5, r.c); diamondC(px, top - 1, 8, 4, '#fbfbf6'); diamondC(px, top - 1, 3, 1.5, r.c);
+    g.fillStyle = OUT; g.fillRect(R(px), R(top) - 5, 1, 3);
+  });
   // wall lamps on both back walls
   if (eq.lamp !== 'none') [[0, 6.2], [0, .6], [1.6, 0]].forEach(([i, j], k) => {
     const [px, py] = isoPt(i, j), lx = R(px), ly = R(py) - 78;
