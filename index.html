@@ -607,6 +607,105 @@ const SFX = {
 };
 function vib(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
 
+// ============================================================ music (synthesised chiptune loops)
+// Patterns are semitone offsets; null = rest (the previous note rings on). bass is one bar, repeated over
+// `chords` (per-bar bass shifts); mel/arp span the whole loop; drums: k kick, K soft kick, s snare, h hat, x shaker, r rim.
+const _ = null;
+const INST = {
+  sq: { type: 'square', vol: .045, dec: .22 },
+  mar: { type: 'triangle', vol: .11, dec: .16 },
+  bell: { type: 'sine', vol: .06, dec: .7, echo: true },
+  acc: { type: 'square', vol: .03, att: .02, detune: 9, vib: 5 },
+  eerie: { type: 'sine', vol: .05, att: .15, echo: true, vib: 4 },
+  tri: { type: 'triangle', vol: .12 },
+  saw: { type: 'sawtooth', vol: .045 },
+  sub: { type: 'sine', vol: .16, att: .05 },
+};
+const SONGS = {
+  z0: { bpm: 116, root: 60, steps: 8, chords: [0, -3, -7, -5], bass: [0, _, 7, _, 0, _, 7, 12], bassInst: INST.tri, lead: INST.sq,
+        mel: [7, _, 4, _, 7, 9, 7, _, 9, _, 12, _, 9, 7, 4, _, 5, _, 9, _, 12, _, 9, 7, 7, _, 11, _, 14, _, 12, _], drums: 'khshkhsh' },
+  z1: { bpm: 104, root: 65, steps: 8, chords: [0, 2, 4, 2], bass: [0, _, _, 7, _, 12, 7, _], bassInst: INST.tri, lead: INST.mar,
+        mel: [12, _, 7, 9, _, 12, _, 14, 14, _, 11, _, 9, _, 7, _, 16, _, 12, _, 9, 12, 16, _, 14, _, 11, 9, 7, _, _, _], drums: 'kx.xrx.x' },
+  z2: { bpm: 84, root: 57, steps: 8, chords: [0, -4, 3, -2], bass: [0, _, _, _, _, _, _, _], bassOct: -12, bassInst: INST.sub, lead: INST.bell, echo: .45,
+        mel: [24, _, _, _, _, _, _, _, 20, _, _, _, _, _, _, _, 19, _, _, _, _, _, _, _, 22, _, _, _, _, _, _, _],
+        arp: [12, 15, 19, 24, 19, 15, 12, 15, 8, 12, 15, 20, 15, 12, 8, 12, 15, 19, 22, 27, 22, 19, 15, 19, 10, 14, 17, 22, 17, 14, 10, 14], arpInst: INST.bell, drums: '..h...h.' },
+  z3: { bpm: 120, root: 62, steps: 6, chords: [0, -2, 0, -5], bass: [0, _, _, 7, _, _], bassInst: INST.tri, lead: INST.acc,
+        mel: [7, _, 7, 5, _, 3, 2, _, -2, 2, _, 5, 7, _, 10, 12, _, 10, 14, _, 11, 7, _, _], drums: 'k..r..' },
+  z4: { bpm: 132, root: 64, steps: 8, chords: [0, 1, 0, -2], bass: [0, 0, 12, 0, 0, 12, 0, 10], bassInst: INST.saw, lead: INST.sq,
+        mel: [12, _, _, 13, _, 12, _, 10, 13, _, _, 15, _, 13, _, 12, 12, _, 15, _, 17, _, 15, 13, 12, _, _, _, 7, _, 10, _], drums: 'khskkhsh' },
+  z5: { bpm: 68, root: 48, steps: 8, chords: [0, -2, -4, -5], bass: [0, _, _, _, _, _, _, _], bassOct: -12, bassInst: INST.sub, lead: INST.eerie, echo: .5,
+        mel: [_, _, 24, _, _, _, 27, _, _, _, 22, _, _, _, 26, _, _, _, 20, _, _, _, 24, _, _, _, 23, _, _, _, 19, _], drums: 'kK......' },
+  boss: { bpm: 152, root: 60, steps: 8, chords: [0, 0, -4, -2], bass: [0, 0, 12, 0, 0, 12, 0, 10], bassInst: INST.saw, lead: INST.sq,
+        mel: [12, _, 15, _, 12, _, 17, 15, 12, _, 15, _, 19, _, 17, 15, 8, _, 12, _, 15, _, 12, _, 10, _, 14, _, 17, _, 19, _], drums: 'khskkhsh' },
+};
+const MUS = { cur: null, next: 0, step: 0, root: 60, bus: null, send: null };
+function musicBus() {
+  if (MUS.bus || !AC) return;
+  MUS.bus = AC.createGain(); MUS.bus.gain.value = .55; MUS.bus.connect(AC.destination);
+  const delay = AC.createDelay(1), fb = AC.createGain();
+  MUS.send = AC.createGain(); MUS.send.gain.value = 0;
+  delay.delayTime.value = .33; fb.gain.value = .38;
+  MUS.send.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(MUS.bus);
+}
+function mnote(midi, t, dur, inst) {
+  const f = 440 * Math.pow(2, (midi - 69) / 12), len = inst.dec || dur, env = AC.createGain();
+  env.gain.setValueAtTime(.0001, t); env.gain.linearRampToValueAtTime(inst.vol, t + (inst.att || .006));
+  env.gain.setValueAtTime(inst.vol, t + Math.max(inst.att || .006, len * .6)); env.gain.exponentialRampToValueAtTime(.0001, t + len);
+  env.connect(MUS.bus); if (inst.echo) env.connect(MUS.send);
+  for (const det of inst.detune ? [0, inst.detune] : [0]) {
+    const o = AC.createOscillator(); o.type = inst.type; o.frequency.value = f; o.detune.value = det;
+    if (inst.vib) { const l = AC.createOscillator(), lg = AC.createGain(); l.frequency.value = inst.vib; lg.gain.value = f * .012; l.connect(lg); lg.connect(o.frequency); l.start(t); l.stop(t + len + .05); }
+    o.connect(env); o.start(t); o.stop(t + len + .05);
+  }
+}
+function mdrum(d, t) {
+  if (d === 'k' || d === 'K') {
+    const o = AC.createOscillator(), e = AC.createGain();
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(42, t + .12);
+    e.gain.setValueAtTime(d === 'k' ? .3 : .15, t); e.gain.exponentialRampToValueAtTime(.0001, t + .16);
+    o.connect(e); e.connect(MUS.bus); o.start(t); o.stop(t + .18); return;
+  }
+  if (d === 'r') { const o = AC.createOscillator(), e = AC.createGain(); o.type = 'square'; o.frequency.value = 820; e.gain.setValueAtTime(.025, t); e.gain.exponentialRampToValueAtTime(.0001, t + .04); o.connect(e); e.connect(MUS.bus); o.start(t); o.stop(t + .05); return; }
+  if (!NB) { NB = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const a = NB.getChannelData(0); for (let i = 0; i < a.length; i++) a[i] = Math.random() * 2 - 1; }
+  const [ft, fq, v, len] = { s: ['highpass', 1800, .08, .12], h: ['highpass', 7000, .02, .03], x: ['bandpass', 6000, .03, .05] }[d];
+  const s = AC.createBufferSource(), fl = AC.createBiquadFilter(), e = AC.createGain();
+  s.buffer = NB; fl.type = ft; fl.frequency.value = fq; e.gain.setValueAtTime(v, t); e.gain.exponentialRampToValueAtTime(.0001, t + len);
+  s.connect(fl); fl.connect(e); e.connect(MUS.bus); s.start(t, Math.random()); s.stop(t + len + .02);
+}
+const holdLen = (arr, i) => { let c = 1; while (c < arr.length && arr[(i + c) % arr.length] === null) c++; return c; };
+function playStep(song, i, t, spb) {
+  const n = song.steps, bars = song.chords.length, k = i % (n * bars), bar = Math.floor(k / n), s = k % n, root = MUS.root;
+  const b = song.bass[s];
+  if (b !== null) mnote(root + (song.bassOct || -24) + song.chords[bar] + b, t, spb * holdLen(song.bass, s) * .95, song.bassInst);
+  const m = song.mel[k];
+  if (m !== null) mnote(root + m, t, spb * holdLen(song.mel, k) * .9, song.lead);
+  if (song.arp && song.arp[k] !== null) mnote(root + song.arp[k], t, spb * .9, song.arpInst);
+  const d = song.drums[s]; if (d !== '.') mdrum(d, t);
+}
+function wantedTrack() {
+  if (state === 'over' || state === 'win' || state === 'trans') return null;
+  if (state === 'warn' || state === 'boss' || (state === 'leap' && leap && leap.boss) || (state === 'pause' && B)) return 'boss';
+  if (state === 'show' && show && show.boss) return null;
+  return 'z' + curZone();
+}
+function musicUpdate() {
+  if (!AC) return;
+  musicBus();
+  const want = muted ? null : wantedTrack(), now = AC.currentTime;
+  if (want !== MUS.cur) {
+    MUS.cur = want; MUS.step = 0; MUS.next = now + .08;
+    if (want) {
+      const zr = SONGS['z' + curZone()].root;
+      MUS.root = want === 'boss' ? (zr < 55 ? zr + 12 : zr) : SONGS[want].root;
+      MUS.send.gain.setTargetAtTime(SONGS[want].echo || 0, now, .1);
+    }
+  }
+  if (!MUS.cur) return;
+  const song = SONGS[MUS.cur], spb = 60 / song.bpm / 2;
+  if (MUS.next < now - .1) MUS.next = now + .05; // tab was hidden: skip rather than burst
+  while (MUS.next < now + .25) { try { playStep(song, MUS.step, MUS.next, spb); } catch (e) {} MUS.next += spb; MUS.step++; }
+}
+
 // ============================================================ game state
 let run = null, state = 'title', st = 0, T = 0, hold = false;
 let bob = null, hook = null, cast = null, biter = null, F = null, B = null, tension = 0, leap = null, show = null;
@@ -1512,7 +1611,7 @@ let last = performance.now();
 function frame(now) {
   const rdt = Math.min(.05, (now - last) / 1000); last = now;
   let dt = rdt; if (slowT > 0) { slowT -= rdt; dt *= .3; }
-  update(dt, rdt); render();
+  update(dt, rdt); render(); musicUpdate();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
