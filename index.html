@@ -860,7 +860,7 @@ const TABLES = [[3, 3], [5, 3], [3, 5], [5, 5], [6.8, 4.2]];
 const DOOR = isoPt(8.3, 7.4), LANE = isoPt(10.9, 6.6), WALK = isoPt(7.6, 8.9), GATE = isoPt(12.9, 3.2);
 // terrace: sun loungers along the front, benches on the right; guests rest here after eating
 const REST = [
-  { t: 'lounge', i: 1.5, j: 9.8, c: '#3a78ff' }, { t: 'lounge', i: 3.7, j: 9.8, c: '#e8453c' }, { t: 'lounge', i: 5.9, j: 9.8, c: '#ffc83a' },
+  { t: 'lounge', i: 2.4, j: 9.8, c: '#3a78ff' }, { t: 'lounge', i: 4.5, j: 9.8, c: '#e8453c' }, { t: 'lounge', i: 6.6, j: 9.8, c: '#ffc83a' },
   { t: 'bench', i: 9.1, j: 2.6 }, { t: 'bench', i: 9.1, j: 4.8 },
 ];
 const restPos = r => r.t === 'lounge' ? isoPt(r.i + .7, r.j + .3) : isoPt(r.i + .28, r.j + .6);
@@ -875,7 +875,7 @@ function tankFish() {
 }
 const cafe = { page: 0, sheet: 0, back: 'title', svc: false, cust: [], spawnT: 0, earned: 0, slot: 0, prev: null, detail: null, chefT: 0 };
 const seatCount = eq => decoItem('seat', (eq || CAFE.deco.eq).seat).seats;
-const seatPos = k => { const [cx, cy] = isoC(...TABLES[k]); return [cx - 9, cy - 5]; };
+const seatPos = k => { const [cx, cy] = isoC(...TABLES[k]); return [cx - 10, cy + 6]; };
 const arriveGap = () => 1.3 / (1 + (charm(CAFE.deco.eq) + Math.min(60, CAFE.pop / 2)) / 30);
 function nextDish() {
   const avail = DISH_KEYS.filter(k => stockOf(k) > 0);
@@ -996,6 +996,12 @@ function isoBox(i0, j0, i1, j1, h, top, left, right, lift) {
   }
   [x3, x1].forEach(x => { const yy = x === x3 ? y3 : y1; g.fillStyle = mixHex(x === x3 ? left : right, OUT, .65); g.fillRect(R(x) - 1, R(yy - lift - h), 1, R(h) + 1); });
   if (h > 2) { g.fillStyle = shade(left, 25); g.fillRect(R(x2), R(y2 - lift - h), 1, R(h)); }
+}
+// round stool: legs, wooden rim and a red cushion; seat 7px above (sx, sy)
+function drawStool(sx, sy) {
+  softShadow(sx, sy, 7);
+  g.fillStyle = '#6b3f1f'; [[-5, 0], [5, 0], [-2, 2], [2, 2]].forEach(([dx, dy]) => g.fillRect(R(sx + dx), R(sy - 7 + dy), 1, 7 - dy));
+  diamondC(sx, sy - 6, 7, 3.5, mixHex('#8a5428', OUT, .6)); diamondC(sx, sy - 7, 6.5, 3.2, '#8a5428'); diamondC(sx, sy - 8, 5.5, 2.8, '#c0392b'); diamondC(sx - 1, sy - 9, 2.5, 1.2, '#e05a50');
 }
 // chair whose seat centre sits above (sx, sy); the backrest runs along the back-left edge
 function drawChair(sx, sy) {
@@ -1185,7 +1191,7 @@ function drawCafeIso(eq) {
   // tables, chairs, guests
   for (let k = 0; k < n; k++) {
     const [cx, cy] = isoC(...TABLES[k]);
-    L.push({ y: cy - 5.2, f: () => drawChair(cx - 9, cy - 5) });
+    L.push({ y: cy + 5.9, f: () => drawStool(cx - 10, cy + 6) });
     L.push({ y: cy + 1, f: () => {
       softShadow(cx + 2, cy, 12);
       g.fillStyle = OUT; g.fillRect(R(cx) + 1, R(cy) - 9, 3, 9); g.fillStyle = '#6b3f1f'; g.fillRect(R(cx) + 2, R(cy) - 9, 1, 8);
@@ -1205,8 +1211,7 @@ function drawCafeIso(eq) {
     } });
   }
   REST.forEach(r => {
-    const [bx, by] = r.t === 'lounge' ? isoPt(r.i + 1.5, r.j + .6) : isoPt(r.i + .45, r.j + 1.2);
-    L.push({ y: by - 1, f: () => {
+    L.push({ y: restPos(r)[1] - .5, f: () => {
       if (r.t === 'lounge') {
         softShadow(...isoPt(r.i + .75, r.j + .3), 16);
         isoBox(r.i, r.j, r.i + 1.5, r.j + .6, 3, '#e8e0d0', '#a86a32', '#8a5428', 3);
@@ -1224,9 +1229,9 @@ function drawCafeIso(eq) {
   L.sort((a, b) => a.y - b.y).forEach(o => o.f());
   // parasols beside the loungers
   REST.filter(r => r.t === 'lounge').forEach(r => {
-    const [px, py] = isoPt(r.i + 1.9, r.j + .1), top = py - 48;
-    g.fillStyle = OUT; g.fillRect(R(px) - 1, R(top), 3, 48); g.fillStyle = '#fbfbf6'; g.fillRect(R(px), R(top), 1, 47);
-    diamondC(px, top, 14, 7, mixHex(r.c, OUT, .6)); diamondC(px, top - 1, 13, 6.5, r.c); diamondC(px, top - 1, 8, 4, '#fbfbf6'); diamondC(px, top - 1, 3, 1.5, r.c);
+    const [px, py] = isoPt(r.i + 1.9, r.j + .1), top = py - 34;
+    g.fillStyle = OUT; g.fillRect(R(px) - 1, R(top), 3, 34); g.fillStyle = '#fbfbf6'; g.fillRect(R(px), R(top), 1, 33);
+    diamondC(px, top, 12, 6, mixHex(r.c, OUT, .6)); diamondC(px, top - 1, 11, 5.5, r.c); diamondC(px, top - 1, 7, 3.5, '#fbfbf6'); diamondC(px, top - 1, 3, 1.5, r.c);
     g.fillStyle = OUT; g.fillRect(R(px), R(top) - 5, 1, 3);
   });
   // wall lamps on both back walls
