@@ -862,7 +862,7 @@ function tankFish() {
   const score = k => (DEX.fish[k].shiny ? 4 : 0) + (DEX.fish[k].gold ? 2 : 0);
   return FISH_ORDER.filter(k => DEX.fish[k]).sort((a, b) => score(b) - score(a));
 }
-const cafe = { sheet: 0, back: 'title', svc: false, cust: [], spawnT: 0, earned: 0, slot: 0, prev: null, detail: null, chefT: 0 };
+const cafe = { page: 0, sheet: 0, back: 'title', svc: false, cust: [], spawnT: 0, earned: 0, slot: 0, prev: null, detail: null, chefT: 0 };
 const seatCount = eq => decoItem('seat', (eq || CAFE.deco.eq).seat).seats;
 const seatPos = k => { const [cx, cy] = isoC(...TABLES[k]); return [cx - 9, cy - 5]; };
 const arriveGap = () => 1.3 / (1 + (charm(CAFE.deco.eq) + Math.min(60, CAFE.pop / 2)) / 30);
@@ -1183,11 +1183,15 @@ const CAFE_BTN = { close: [152, 2, 24, 14], open: [40, 262, 100, 20] };
 const slotChip = i => [7 + i * 24, 154, 23, 14];
 const decoRow = i => [10, 172 + i * 27, 160, 25];
 const decoBtn = i => [118, 177 + i * 27, 48, 15];
-const recipeCell = i => [9 + (i % 6) * 27, 154 + Math.floor(i / 6) * 23, 26, 22];
+const menuCell = i => [8 + (i % 2) * 83, 155 + Math.floor(i / 2) * 25, 81, 23];   // 营业: 8 per page
+const recipeCell = i => [8 + (i % 2) * 83, 155 + Math.floor(i / 2) * 21, 81, 20]; // 菜谱: 10 per page
+const PAGE_PREV = [8, 266, 26, 16], PAGE_NEXT = [146, 266, 26, 16];
+const menuList = () => DISH_KEYS.filter(k => stockOf(k) > 0);
+const sheetPages = () => cafe.sheet === 0 ? Math.max(1, Math.ceil(menuList().length / 8)) : Math.ceil(DISH_KEYS.length / 10);
 function cafePress(p) {
   if (cafe.detail) { cafe.detail = null; SFX.click(); return; }
   if (inR(p, CAFE_BTN.close)) { go(cafe.back); st = 2; SFX.click(); return; }
-  for (let i = 0; i < 3; i++) if (inR(p, cafeTabBtn(i))) { cafe.sheet = cafe.sheet === i ? null : i; cafe.prev = null; SFX.click(); return; }
+  for (let i = 0; i < 3; i++) if (inR(p, cafeTabBtn(i))) { cafe.sheet = cafe.sheet === i ? null : i; cafe.prev = null; cafe.page = 0; SFX.click(); return; }
   if (cafe.sheet === null) return;
   if (p.y < 150) { cafe.sheet = null; cafe.prev = null; return; }
   if (cafe.sheet === 0 && inR(p, CAFE_BTN.open) && !cafe.svc) {
@@ -1195,7 +1199,12 @@ function cafePress(p) {
     else { pop('冰箱是空的 去钓鱼吧', 90, 240, '#ff8a7a', 9, 1.2); SFX.fail(); }
     return;
   }
-  if (cafe.sheet === 1) DISH_KEYS.forEach((k, i) => { if (inR(p, recipeCell(i)) && CAFE.known[k]) { cafe.detail = k; SFX.click(); } });
+  if (cafe.sheet === 0 || cafe.sheet === 1) {
+    const n = sheetPages();
+    if (n > 1 && inR(p, PAGE_PREV)) { cafe.page = (cafe.page + n - 1) % n; SFX.click(); return; }
+    if (n > 1 && inR(p, PAGE_NEXT)) { cafe.page = (cafe.page + 1) % n; SFX.click(); return; }
+  }
+  if (cafe.sheet === 1) DISH_KEYS.slice(cafe.page * 10, cafe.page * 10 + 10).forEach((k, i) => { if (inR(p, recipeCell(i)) && CAFE.known[k]) { cafe.detail = k; SFX.click(); } });
   if (cafe.sheet === 2) {
     for (let i = 0; i < DECO_SLOTS.length; i++) if (inR(p, slotChip(i))) { cafe.slot = i; cafe.prev = null; SFX.click(); return; }
     const slot = DECO_SLOTS[cafe.slot];
@@ -1240,24 +1249,29 @@ function drawCafeSheet(eq) {
   panel(4, 150, 172, 142);
   const dark = '#4a2c17';
   if (cafe.sheet === 0) {
-    const stock = DISH_KEYS.filter(k => stockOf(k) > 0);
+    const stock = menuList(), pages = sheetPages(); cafe.page = Math.min(cafe.page || 0, pages - 1);
     if (!stock.length) txt('冰箱空空的, 去钓些鱼回来吧', 90, 200, 8, '#8a6a4a', 'center', null);
-    stock.slice(0, 15).forEach((k, i) => {
-      const x = 10 + (i % 5) * 32, y = 156 + Math.floor(i / 5) * 30;
-      g.fillStyle = '#ecd49c'; g.fillRect(x, y, 30, 28);
-      g.drawImage(dishImg(k), x + 3, y + 1);
-      txt('×' + stockOf(k), x + 29, y + 23, 7, dark, 'right', null);
+    stock.slice(cafe.page * 8, cafe.page * 8 + 8).forEach((k, i) => {
+      const [x, y, w, h] = menuCell(i);
+      g.fillStyle = DISH[k].boss ? '#e8c0a0' : '#ecd49c'; g.fillRect(x, y, w, h);
+      g.drawImage(dishImg(k), x + 1, y + 3);
+      txt(DISH[k].name, x + 27, y + 7, 7, dark, 'left', null);
+      txt('×' + stockOf(k), x + 27, y + 17, 7, '#7a3b12', 'left', null);
+      g.drawImage(I.coin, x + 47, y + 12); txt(String(DISH[k].price), x + 57, y + 17, 7, '#9a6a00', 'left', null);
     });
-    if (stock.length > 15) txt('还有 ' + (stock.length - 15) + ' 种…', 166, 251, 7, '#8a6a4a', 'right', null);
+    if (pages > 1) { button(PAGE_PREV, '◀'); button(PAGE_NEXT, '▶'); }
     if (cafe.svc) { g.fillStyle = '#8a7a60'; g.fillRect(...CAFE_BTN.open); txt('营业中  +' + cafe.earned, 90, 272, 9, '#f6e3b4', 'center', null); }
     else button(CAFE_BTN.open, '开始营业');
   } else if (cafe.sheet === 1) {
-    DISH_KEYS.forEach((k, i) => {
+    const pages = sheetPages(); cafe.page = Math.min(cafe.page || 0, pages - 1);
+    DISH_KEYS.slice(cafe.page * 10, cafe.page * 10 + 10).forEach((k, i) => {
       const [x, y, w, h] = recipeCell(i), known = CAFE.known[k];
       g.fillStyle = DISH[k].boss ? '#e8c0a0' : '#ecd49c'; g.fillRect(x, y, w, h);
-      g.drawImage(known ? dishImg(k) : dishSil(k), x + 1, y + 2);
+      g.drawImage(known ? dishImg(k) : dishSil(k), x + 1, y + 1);
+      txt(known ? DISH[k].name : '？？？', x + 27, y + 10, 7, known ? dark : '#a08a6a', 'left', null);
     });
-    txt('菜谱 ' + DISH_KEYS.filter(k => CAFE.known[k]).length + ' / ' + DISH_KEYS.length + '   点菜看详情', 90, 281, 7, '#8a6a4a', 'center', null);
+    button(PAGE_PREV, '◀'); button(PAGE_NEXT, '▶');
+    txt((cafe.page + 1) + '/' + pages + '  收集 ' + DISH_KEYS.filter(k => CAFE.known[k]).length + '/' + DISH_KEYS.length, 90, 274, 7, '#8a6a4a', 'center', null);
   } else {
     DECO_SLOTS.forEach((s, i) => {
       const r = slotChip(i);
@@ -1658,10 +1672,10 @@ window.addEventListener('resize', fit); fit();
 function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
 const inR = (p, r) => p.x >= r[0] && p.x <= r[0] + r[2] && p.y >= r[1] && p.y <= r[1] + r[3];
 const BTN = {
-  titleDex: [12, 248, 50, 17], titleCafe: [65, 248, 50, 17], titleShop: [118, 248, 50, 17],
+  titleCafe: [26, 232, 128, 24], titleDex: [26, 262, 62, 15], titleShop: [92, 262, 62, 15],
   cont: [26, 196, 128, 18], again: [22, 218, 46, 17], overCafe: [70, 218, 40, 17], overShop: [112, 218, 46, 17],
   shopClose: [146, 26, 22, 14],
-  resume: [40, 194, 100, 20], newGame: [58, 220, 64, 16],
+  resume: [30, 184, 120, 20], newGame: [56, 208, 68, 15],
   menuBack: [40, 136, 100, 20], menuHome: [40, 164, 100, 20],
   dexClose: [146, 30, 22, 14], dexPrev: [12, 272, 28, 15], dexNext: [140, 272, 28, 15],
 };
@@ -1701,9 +1715,25 @@ function shopPress(p) {
     if (inR(p, shopRowRect(i))) { shopSel = it.id; SFX.click(); return; }
   }
 }
+// Tester shortcut on the title: tap the sun 3 times, then the cat in the boat 3 times (within 4s).
+const TAP_SUN = [84, 22, 32, 32], TAP_CAT = [6, 50, 44, 40];
+let testerSeq = [];
+function testerTap(p) {
+  const hit = inR(p, TAP_SUN) ? 'S' : inR(p, TAP_CAT) ? 'C' : null;
+  if (!hit) { testerSeq = []; return false; }
+  const now = performance.now();
+  testerSeq = testerSeq.filter(t => now - t.t < 4000); testerSeq.push({ k: hit, t: now });
+  if (testerSeq.map(t => t.k).join('') .endsWith('SSSCCC')) {
+    testerSeq = []; earn(10000);
+    FISH_ORDER.forEach(k => { if (!SP[k].rescue) { storeFish(k); storeFish(k); } });
+    pop('测试金币 +10000  冰箱补满', 90, 120, '#ffe14a', 10, 2); SFX.win();
+  } else SFX.click();
+  return true;
+}
 function openDex(from) { dexBack = from; dexPage = Math.min(DEX.zone, run ? run.zone : 0); go('dex'); SFX.click(); }
 function onPress(p) {
   if (state === 'title') {
+    if (testerTap(p)) return;
     if (inR(p, BTN.titleDex)) openDex('title');
     else if (inR(p, BTN.titleShop)) openShop('title');
     else if (inR(p, BTN.titleCafe)) openCafe('title');
@@ -2337,13 +2367,21 @@ function drawOverlay(z) {
       button(BTN.resume, '继续 · ' + ZONES[SAVED.zone].name);
       button(BTN.newGame, '新游戏');
     } else {
-      if (Math.floor(T * 2) % 2 === 0) txt('点击开始', 90, 208, 12, '#ffffff');
-      g.drawImage(I.hand, 104, 218 + R(Math.abs(Math.sin(T * 4)) * -4));
+      if (Math.floor(T * 2) % 2 === 0) txt('点击开始钓鱼', 90, 194, 12, '#ffffff');
+      g.drawImage(I.hand, 118, 203 + R(Math.abs(Math.sin(T * 4)) * -4));
     }
-    button(BTN.titleDex, '图鉴'); button(BTN.titleCafe, '小馆'); button(BTN.titleShop, '商店');
-    if (totalStock() > 0) { g.fillStyle = OUT; g.fillRect(108, 245, 7, 7); g.fillStyle = '#e8453c'; g.fillRect(109, 246, 5, 5); }
-    g.drawImage(I.coin, 70, 272); txt(String(WALLET.coins), 81, 277, 8, '#ffe14a', 'left');
-    if (best > 0) txt('最高纪录 ' + best, 90, 292, 7, '#dff6ff');
+    // big café button with a little shop front
+    { const [x, y, w, h] = BTN.titleCafe;
+      g.fillStyle = OUT; g.fillRect(x, y, w, h); g.fillStyle = '#6b3f1f'; g.fillRect(x + 1, y + 1, w - 2, h - 2);
+      g.fillStyle = '#c0703a'; g.fillRect(x + 1, y + 1, w - 2, h - 4); g.fillStyle = '#e8a060'; g.fillRect(x + 2, y + 2, w - 4, 1);
+      for (let k = 0; k < 8; k++) { g.fillStyle = k % 2 ? '#fbfbf6' : '#e8453c'; g.fillRect(x + 6 + k * 3, y + 4, 3, 4); }
+      g.fillStyle = '#fbe8c8'; g.fillRect(x + 7, y + 8, 22, 11); g.fillStyle = '#6fa8e0'; g.fillRect(x + 9, y + 10, 7, 6); g.fillStyle = '#8a5428'; g.fillRect(x + 19, y + 11, 7, 8);
+      txt('渔喵小馆', x + 76, y + 11, 11, '#ffffff', 'center', OUT);
+      if (totalStock() > 0) { g.fillStyle = OUT; g.fillRect(x + w - 8, y - 3, 9, 9); g.fillStyle = '#e8453c'; g.fillRect(x + w - 7, y - 2, 7, 7); txt(String(Math.min(99, totalStock())), x + w - 3.5, y + 1.5, 5.5, '#ffffff', 'center', null); }
+    }
+    button(BTN.titleDex, '图鉴 ' + dexCount() + '/' + DEX_TOTAL); button(BTN.titleShop, '商店');
+    g.drawImage(I.coin, 64, 283); txt(String(WALLET.coins), 75, 288, 8, '#ffe14a', 'left');
+    if (best > 0) txt('最高纪录 ' + best, 90, 302, 7, '#dff6ff');
     return;
   }
   if (state === 'dex') { drawDex(); return; }
