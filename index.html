@@ -1033,7 +1033,7 @@ function startFight() {
         timer: run.fishTotal === 0 ? 1.8 : rand(.6, 1.2), stun: 0, grace: 0, frenzy: run.fever,
         pow: sp.pow * z.pow * run.calm, spd: sp.spd * (.9 + z.pow * .2) * (.5 + .5 * run.slow), freq: sp.freq * (.85 + .15 * z.pow), dir: 1, critT: .45, zapT: zapInterval(),
         weight: 1 + .12 * run.zone, tele: .8 - .03 * run.zone };
-  biter = null; tension = 25; run.fights++;
+  biter = null; tension = 25; run.fights++; F.y0 = F.y;
   splash(bob.x, 8, .8); bob = null; hook = null;
   go('fight'); SFX.hook(); vib(30); shake = 2;
 }
@@ -1068,6 +1068,10 @@ function tensionStep(A, dt, reel) {
     tension = Math.max(0, tension - 45 * dt);
     prog = dashing ? -A.spd * dt : -8 * dt;
   }
+  if (dashing) {
+    shake = Math.max(shake, hold ? 1.2 + tension / 35 : .8);
+    if (hold) { A.vibT = (A.vibT || 0) - dt; if (A.vibT <= 0) { A.vibT = .22; vib(35); } }
+  } else if (hold && !(A.stun > 0) && Math.random() < dt * 7) part({ x: A.px + rand(-6, 6), y: A.py + rand(-4, 2), vy: -rand(15, 30), life: .5, col: '#9dff9d' });
   if (hold && tension > 65) { warnT -= dt; if (warnT <= 0) { warnT = .18; SFX.warn(); vib(15); } }
   if (run.zap > 0) { A.zapT -= dt; if (A.zapT <= 0) { A.zapT = zapInterval(); A.stun = 1 + .12 * run.zap; zapFx(A); } }
   return prog;
@@ -1576,7 +1580,7 @@ function drawOverlay(z) {
   }
   if (state === 'wait' && biter && biter.ph === 'bite') {
     g.drawImage(I.bangY, R(bob.x - 2), SURF - 22 + R(Math.sin(T * 20)));
-    if (run.fights < 3) txt('按住!', bob.x, SURF - 30, 11, '#ffe14a');
+    drawAction('bite');
   }
   if (state === 'fight' || state === 'boss') {
     const A = state === 'fight' ? F : B;
@@ -1586,8 +1590,17 @@ function drawOverlay(z) {
       g.fillStyle = '#ff3b3b'; g.globalAlpha = .75;
       g.fillRect(0, 0, W, 3); g.fillRect(0, H - 3, W, 3); g.fillRect(0, 0, 3, H); g.fillRect(W - 3, 0, 3, H); g.globalAlpha = 1;
     }
-    if (hold && tension > 60) txt('松手!', 150, 96, 12, '#ff5a4a');
-    else if (!hold && A && A.state === 'calm' && run.fights <= 3) txt('按住收线', 90, 288, 10, '#ffffff');
+    if (A) {
+      const danger = (A.state === 'tele' || A.state === 'dash') && !(A.stun > 0) && !(A.frenzy > 0);
+      if (danger && hold) { g.globalAlpha = Math.min(.3, tension / 300) + .06 * Math.sin(T * 25); g.fillStyle = '#ff2a2a'; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
+      drawAction(A.frenzy > 0 ? 'frenzy' : A.stun > 0 ? 'stun' : danger ? (hold ? 'release' : 'waitout') : (hold ? 'reeling' : 'hold'));
+    }
+    if (state === 'fight' && F) {
+      const p = clamp(1 - (F.y - SURF) / Math.max(20, F.y0 - SURF), 0, 1);
+      g.fillStyle = OUT; g.fillRect(29, 26, 122, 7); g.fillStyle = '#2a2f45'; g.fillRect(30, 27, 120, 5);
+      g.fillStyle = '#5fd35f'; g.fillRect(30, 27, R(120 * p), 5); g.fillStyle = '#b8ffb0'; g.fillRect(30, 27, R(120 * p), 1);
+      txt('收线进度', 90, 39, 7, '#dff6ff');
+    }
     if (A && A.frenzy > 0) {
       g.globalAlpha = .12 + .08 * Math.sin(T * 20); g.fillStyle = '#ffd23f'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
       txt('狂收!!', 90, 100, 16, '#ffe14a');
@@ -1663,6 +1676,34 @@ function drawCard() {
     g.drawImage(I.coin, 72, 190); txt('+' + sh.val, 83, 195, 9, '#9a6a00', 'left', null);
   }
   if (st > .35 && Math.floor(T * 2.5) % 2 === 0) txt('点击继续', 90, py + ph + 11, 9, '#ffffff');
+}
+// Big always-on action bar during bites and fights: what to do right now, in two words and a hand.
+const ACTIONS = {
+  bite:    { t: '按住不放!', bg: '#e8a020', hi: '#ffd23f', press: true, blink: true },
+  hold:    { t: '按住收线',   bg: '#2f9a4a', hi: '#5fd35f', press: true, blink: true },
+  reeling: { t: '收线中…',    bg: '#2f9a4a', hi: '#8fef8f', press: true },
+  release: { t: '松开!',      bg: '#c02a2a', hi: '#ff5a4a', press: false, blink: true },
+  waitout: { t: '等它挣扎完',  bg: '#a0582a', hi: '#e8a060', press: false },
+  stun:    { t: '麻痹了 快收!', bg: '#b89a10', hi: '#fff27a', press: true },
+  frenzy:  { t: '按住狂收!',   bg: '#c08a10', hi: '#ffe14a', press: true },
+};
+function drawAction(mode) {
+  const a = ACTIONS[mode], x = 30, y = 268, w = 120, h = 22;
+  const on = !a.blink || Math.floor(T * 5) % 2 === 0;
+  g.fillStyle = OUT; g.fillRect(x, y, w, h);
+  g.fillStyle = on ? a.hi : a.bg; g.fillRect(x + 1, y + 1, w - 2, h - 2);
+  g.fillStyle = a.bg; g.fillRect(x + 1, y + h - 4, w - 2, 3);
+  // hand: pressed down with a ripple, or lifted with motion lines
+  const hx = x + 6, hy = y + 5;
+  if (a.press) {
+    const r = 2 + (T * 8) % 4; g.globalAlpha = .7; g.fillStyle = '#ffffff';
+    g.fillRect(hx + 3 - R(r), hy + 1, R(r) * 2 + 1, 1); g.globalAlpha = 1;
+    g.drawImage(I.hand, hx, hy + 2 + (mode === 'reeling' ? R(Math.abs(Math.sin(T * 10))) : 0), 10, 11);
+  } else {
+    g.drawImage(I.hand, hx, hy - 1 - R(Math.abs(Math.sin(T * 8)) * 2), 10, 11);
+    g.fillStyle = '#ffffff'; g.fillRect(hx + 12, hy, 1, 3); g.fillRect(hx + 12, hy + 5, 1, 2);
+  }
+  txt(a.t, x + 70, y + 10, 11, '#ffffff', 'center', OUT);
 }
 function drawShop() {
   g.globalAlpha = .8; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
