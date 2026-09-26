@@ -414,6 +414,7 @@ I.shield = rows(['..XXX..', '.XWFFX.', 'XWFFFFX', 'XFFFFFX', 'XFFFFFX', '.XFFFX.
 I.fever = rows(['...X...', '..XX...', '..XXX.X', '.XXYXXX', 'XXYYYXX', 'XXYYYXX', '.XXYXX.'], { X: '#ff6a2a', Y: '#ffe14a' });
 I.lucky = rows(['...X...', '..XXX..', 'XXXWXXX', '.XXXXX.', '..XXX..', '.XX.XX.', '.X...X.'], { X: '#ffc83a', W: '#ffffff' });
 I.heal = I.heart;
+I.home = rows(['...X...', '..XXX..', '.XXXXX.', 'XXXXXXX', '.XX.XX.', '.XX.XX.'], { X: '#ffffff' });
 I.skull = rows(['.XXXXX.', 'XXXXXXX', 'X.XXX.X', 'XXXXXXX', 'XXX.XXX', '.XXXXX.', '.X.X.X.'], { X: '#f0e6d2' });
 I.bang = rows(['XXX', 'XXX', 'XXX', 'XXX', '.X.', '...', 'XXX'], { X: '#ff3b3b' });
 I.bangY = rows(['XXX', 'XXX', 'XXX', 'XXX', '.X.', '...', 'XXX'], { X: '#ffe14a' });
@@ -831,6 +832,7 @@ function playStep(song, i, t, spb) {
   const d = song.drums[s]; if (d && d !== '.') mdrum(d, t);
 }
 function wantedTrack() {
+  if (state === 'menu') return MUS.cur;
   if (state === 'over' || state === 'win' || state === 'trans') return null;
   if (state === 'warn' || state === 'boss' || (state === 'leap' && leap && leap.boss) || (state === 'pause' && B)) return 'boss';
   if (state === 'show' && show && show.boss) return null;
@@ -864,11 +866,24 @@ let bob = null, hook = null, cast = null, biter = null, F = null, B = null, tens
 let pauseNext = null, pauseDur = 0, dexPage = 0, dexBack = 'title';
 let P = [], POPS = [], INK = [], decor = [], TQ = [];
 let shake = 0, flash = 0, slowT = 0, zapBolt = null, warnT = 0, tickT = 0, coinsShown = 0, bubbleT = 0, coinSfxT = 0;
-let catMood = null, catMoodT = 0, blinkT = 2, jerk = false, transDone = false;
+let catMood = null, catMoodT = 0, blinkT = 2, jerk = false, transDone = false, menuFrom = 'idle';
+const IN_RUN = ['idle', 'cast', 'wait', 'fight', 'leap', 'show', 'warn', 'boss', 'pause'];
 
 const curZone = () => run ? run.zone : 0;
 const Z = () => ZONES[curZone()];
-function go(s) { state = s; st = 0; }
+function go(s) { state = s; st = 0; if (s === 'idle' && run) saveRun(); }
+// ---------- run save: the live run between fish (with its zone checkpoint), so leaving or refreshing resumes it
+let SAVED = load('sea-monster-run', null);
+function saveRun(data) { SAVED = data || run; save('sea-monster-run', SAVED); }
+function clearRun() { SAVED = null; try { localStorage.removeItem('sea-monster-run'); } catch (e) {} }
+function enterScene(zi) { buildScenery(zi); getBg(zi); decor = Array.from({ length: 4 }, () => newDecor(true)); }
+function resumeRun() {
+  if (!SAVED) return;
+  run = JSON.parse(JSON.stringify(SAVED)); run.newT = 0; run.newBest = false;
+  coinsShown = run.coins; B = null; F = null; INK = []; tension = 0; biter = null; bob = null; hook = null;
+  enterScene(run.zone); SFX.click();
+  if (run.zoneCaught >= NEED && !run.bossDone) startBoss(); else go('idle');
+}
 function pause(d, fn) { go('pause'); pauseDur = d; pauseNext = fn; }
 function mood(m, t) { catMood = m; catMoodT = t; }
 
@@ -888,8 +903,7 @@ function setupZone(zi) {
     // checkpoint: what the run looked like on entering this zone, restored by "continue"
     const { cp, ...snap } = run; run.cp = JSON.parse(JSON.stringify(snap));
   }
-  buildScenery(zi); getBg(zi);
-  decor = Array.from({ length: 4 }, () => newDecor(true));
+  enterScene(zi);
 }
 function weightedFish() {
   const list = Z().fish, tot = list.reduce((s, k) => s + (SP[k].wt || 1), 0);
@@ -972,12 +986,15 @@ const BTN = {
   titleDex: [28, 248, 60, 17], titleShop: [92, 248, 60, 17],
   cont: [26, 196, 128, 18], again: [22, 218, 46, 17], overDex: [70, 218, 40, 17], overShop: [112, 218, 46, 17],
   shopClose: [146, 26, 22, 14],
+  resume: [40, 194, 100, 20], newGame: [58, 220, 64, 16],
+  menuBack: [40, 136, 100, 20], menuHome: [40, 164, 100, 20],
   dexClose: [146, 30, 22, 14], dexPrev: [12, 272, 28, 15], dexNext: [140, 272, 28, 15],
 };
 window.addEventListener('pointerdown', e => {
   e.preventDefault(); initAudio();
   const p = toLogical(e);
   if (p.x >= 162 && p.y <= 18 && p.y >= -10) { muted = !muted; save('sea-monster-mute', muted); return; }
+  if (p.x >= 160 && p.y > 18 && p.y <= 38 && IN_RUN.includes(state)) { menuFrom = state; hold = false; go('menu'); SFX.click(); return; }
   hold = true; if (state === 'fight' || state === 'boss') jerk = true; onPress(p);
 }, { passive: false });
 ['pointerup', 'pointercancel', 'blur'].forEach(ev => window.addEventListener(ev, () => { hold = false; }));
@@ -1011,7 +1028,18 @@ function shopPress(p) {
 }
 function openDex(from) { dexBack = from; dexPage = Math.min(DEX.zone, run ? run.zone : 0); go('dex'); SFX.click(); }
 function onPress(p) {
-  if (state === 'title') { if (inR(p, BTN.titleDex)) openDex('title'); else if (inR(p, BTN.titleShop)) openShop('title'); else { newRun(); go('idle'); } return; }
+  if (state === 'title') {
+    if (inR(p, BTN.titleDex)) openDex('title');
+    else if (inR(p, BTN.titleShop)) openShop('title');
+    else if (SAVED) { if (inR(p, BTN.resume)) resumeRun(); else if (inR(p, BTN.newGame)) { newRun(); go('idle'); } }
+    else { newRun(); go('idle'); }
+    return;
+  }
+  if (state === 'menu') {
+    if (inR(p, BTN.menuBack)) { state = menuFrom; SFX.click(); }
+    else if (inR(p, BTN.menuHome)) { F = null; B = null; biter = null; bob = null; hook = null; INK = []; tension = 0; go('title'); SFX.click(); }
+    return;
+  }
   if (state === 'shop') { shopPress(p); return; }
   if (state === 'dex') {
     if (inR(p, BTN.dexClose)) { go(dexBack); st = 2; SFX.click(); }
@@ -1201,6 +1229,7 @@ function startShow() {
   leap = null; go('show');
 }
 function endShow() {
+  if (run && !show.boss) saveRun();
   const wasBoss = show.boss; show = null;
   if (wasBoss) { if (run.zone < ZONES.length - 1) { transDone = false; go('trans'); } else winGame(); return; }
   if (run.zoneCaught >= NEED && !run.bossDone) startBoss(); else go('idle');
@@ -1299,7 +1328,12 @@ function updTrans() {
   if (st >= .4 && !transDone) { transDone = true; setupZone(run.zone + 1); }
   if (st >= 1.6) go('idle');
 }
-function gameOver() { saveBest(); SFX.lose(); go('over'); }
+function gameOver() {
+  saveBest(); SFX.lose(); go('over');
+  // what "continue from this zone" would give, so it survives leaving the page
+  const cp = run.cp, c = JSON.parse(JSON.stringify(cp));
+  c.hp = Math.max(3, c.hp); c.continues = (run.continues || 0) + 1; c.cp = cp; saveRun(c);
+}
 // Retry the zone you died in with the buffs and coins you had when you entered it, and at least 3 hearts.
 function continueRun() {
   const cp = run.cp, continues = (run.continues || 0) + 1;
@@ -1308,7 +1342,7 @@ function continueRun() {
   coinsShown = run.coins; B = null; F = null; INK = []; tension = 0;
   setupZone(run.zone); go('idle'); SFX.click();
 }
-function winGame() { saveBest(); SFX.win(); go('win'); }
+function winGame() { saveBest(); SFX.win(); go('win'); clearRun(); }
 
 // ============================================================ update
 function spawnAmbient(z, dt) {
@@ -1326,7 +1360,7 @@ function update(dt, rdt) {
   if (zapBolt) { zapBolt.t -= rdt; if (zapBolt.t <= 0) zapBolt = null; }
   if (run) { coinsShown += (run.coins - coinsShown) * Math.min(1, rdt * 4); if (Math.abs(run.coins - coinsShown) < .5) coinsShown = run.coins; if (run.newT > 0) run.newT -= rdt; }
   coinSfxT -= rdt;
-  if (state === 'dex' || state === 'shop') { for (let i = POPS.length - 1; i >= 0; i--) { const p = POPS[i]; p.life -= rdt; p.y -= 14 * rdt; if (p.life <= 0) POPS.splice(i, 1); } return; }
+  if (state === 'dex' || state === 'shop' || state === 'menu') { for (let i = POPS.length - 1; i >= 0; i--) { const p = POPS[i]; p.life -= rdt; p.y -= 14 * rdt; if (p.life <= 0) POPS.splice(i, 1); } return; }
   const z = Z();
   for (let i = decor.length - 1; i >= 0; i--) {
     const f = decor[i]; f.x += f.vx * dt * (f.flee ? 3 : 1); f.y += Math.sin(T * 1.3 + f.x * .05) * .05;
@@ -1582,6 +1616,7 @@ function drawLeap() {
 // ============================================================ HUD + overlays
 function drawHUD(z) {
   if (!run || state === 'title' || state === 'dex' || state === 'shop') return;
+  if (IN_RUN.includes(state) || state === 'menu') g.drawImage(I.home, 169, 24);
   const n = Math.max(3, run.hp);
   for (let i = 0; i < n; i++) g.drawImage(i < run.hp ? I.heart : I.heartE, 2 + i * 9, 2);
   g.drawImage(I.coin, 118, 2); txt(String(R(coinsShown)), 129, 7, 8, '#ffe14a', 'left');
@@ -1617,8 +1652,13 @@ function drawOverlay(z) {
     txt('渔喵传说', 90, 128, 28, '#ffe14a', 'center', OUT);
     txt('FISHY TAILS', 90, 150, 9, '#9fe8ff', 'center', OUT);
     txt('猫猫钓鱼 · 吃Buff · 打海怪', 90, 166, 9, '#ffffff');
-    if (Math.floor(T * 2) % 2 === 0) txt('点击开始', 90, 208, 12, '#ffffff');
-    g.drawImage(I.hand, 104, 218 + R(Math.abs(Math.sin(T * 4)) * -4));
+    if (SAVED) {
+      button(BTN.resume, '继续 · ' + ZONES[SAVED.zone].name);
+      button(BTN.newGame, '新游戏');
+    } else {
+      if (Math.floor(T * 2) % 2 === 0) txt('点击开始', 90, 208, 12, '#ffffff');
+      g.drawImage(I.hand, 104, 218 + R(Math.abs(Math.sin(T * 4)) * -4));
+    }
     button(BTN.titleDex, '图鉴 ' + dexCount() + '/' + DEX_TOTAL); button(BTN.titleShop, '商店');
     g.drawImage(I.coin, 70, 272); txt(String(WALLET.coins), 81, 277, 8, '#ffe14a', 'left');
     if (best > 0) txt('最高纪录 ' + best, 90, 292, 7, '#dff6ff');
@@ -1626,6 +1666,14 @@ function drawOverlay(z) {
   }
   if (state === 'dex') { drawDex(); return; }
   if (state === 'shop') { drawShop(); return; }
+  if (state === 'menu') {
+    g.globalAlpha = .6; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+    panel(28, 104, 124, 100);
+    txt('暂停', 90, 122, 12, '#4a2c17', 'center', null);
+    button(BTN.menuBack, '继续游戏'); button(BTN.menuHome, '回到主页');
+    txt('进度会自动保存', 90, 194, 7, '#8a6a4a', 'center', null);
+    return;
+  }
   if (state === 'idle') {
     g.drawImage(I.hand, 120, 190 + R(Math.abs(Math.sin(T * 4)) * -5));
     txt('点击抛竿', 124, 214, 10, '#ffffff');
