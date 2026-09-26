@@ -1,0 +1,1484 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1020">
+<meta name="description" content="渔喵传说 Fishy Tails：竖屏像素钓鱼小游戏。按住收线、线红松手，每种鱼给一个 Buff，闯过六片海域挑战海怪。">
+<title>渔喵传说 Fishy Tails</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=ZCOOL+QingKe+HuangYou&display=swap">
+<style>
+  :root { --ground: #0b1020; color-scheme: dark; }
+  html, body { height: 100%; margin: 0; background: var(--ground); overflow: hidden; overscroll-behavior: none; }
+  body { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  #wrap {
+    position: fixed; inset: 0; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  #c { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" aria-label="渔喵传说游戏画面"></canvas></div>
+<script>
+(() => {
+'use strict';
+const SCRIPT_TEXT = document.currentScript ? document.currentScript.textContent : '';
+// ============================================================ constants
+const W = 180, H = 320, SURF = 84, SEABED = 300, NEED = 4, BX = 6, OUT = '#1b1b2f';
+// Fight tuning (checked with a Monte-Carlo of play styles): holding through a dash must snap the line,
+// random tapping must lose, and a player reacting to the "!" within ~0.4s should land most fish.
+const REEL = 60, DASH_RATE = 240, JERK = 11;
+const FONT = '"ZCOOL QingKe HuangYou","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif';
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const R = Math.round;
+function mk(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+
+// ============================================================ pixel painter
+class Grid {
+  constructor(w, h) { this.w = w; this.h = h; this.d = new Array(w * h).fill(null); }
+  set(x, y, c) { x |= 0; y |= 0; if (c && x >= 0 && y >= 0 && x < this.w && y < this.h) this.d[y * this.w + x] = c; }
+  get(x, y) { return (x < 0 || y < 0 || x >= this.w || y >= this.h) ? null : this.d[y * this.w + x]; }
+  ell(cx, cy, rx, ry, c) {
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
+      const dx = (x + .5 - cx) / rx, dy = (y + .5 - cy) / ry;
+      if (dx * dx + dy * dy <= 1) this.set(x, y, typeof c === 'function' ? c(x, y) : c);
+    }
+  }
+  rect(x, y, w, h, c) { for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) this.set(i, j, c); }
+  tri(ax, ay, bx, by, cx, cy, c) {
+    const e = (px, py, qx, qy, rx, ry) => (qx - px) * (ry - py) - (qy - py) * (rx - px);
+    const x0 = Math.floor(Math.min(ax, bx, cx)), x1 = Math.ceil(Math.max(ax, bx, cx));
+    const y0 = Math.floor(Math.min(ay, by, cy)), y1 = Math.ceil(Math.max(ay, by, cy));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const px = x + .5, py = y + .5;
+      const w0 = e(bx, by, cx, cy, px, py), w1 = e(cx, cy, ax, ay, px, py), w2 = e(ax, ay, bx, by, px, py);
+      if ((w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0)) this.set(x, y, c);
+    }
+  }
+  map(fn) { for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) { const c = this.get(x, y); if (c) this.d[y * this.w + x] = fn(x, y, c) || c; } }
+  outline(col = OUT) {
+    const add = [];
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++)
+      if (!this.get(x, y) && (this.get(x - 1, y) || this.get(x + 1, y) || this.get(x, y - 1) || this.get(x, y + 1))) add.push([x, y]);
+    add.forEach(([x, y]) => this.set(x, y, col));
+  }
+  canvas() {
+    const c = mk(this.w, this.h), x = c.getContext('2d');
+    for (let j = 0; j < this.h; j++) for (let i = 0; i < this.w; i++) { const col = this.d[j * this.w + i]; if (col) { x.fillStyle = col; x.fillRect(i, j, 1, 1); } }
+    return c;
+  }
+}
+function paint(w, h, fn, outline = true) { const G = new Grid(w, h); fn(G); if (outline) G.outline(); return G.canvas(); }
+function rows(rs, pal, outline = true) {
+  return paint(rs[0].length + 2, rs.length + 2, G => rs.forEach((r, y) => [...r].forEach((ch, x) => { if (pal[ch]) G.set(x + 1, y + 1, pal[ch]); })), outline);
+}
+function flipC(c) { const o = mk(c.width, c.height), x = o.getContext('2d'); x.translate(c.width, 0); x.scale(-1, 1); x.drawImage(c, 0, 0); return o; }
+function tintC(c, col, a) {
+  const o = mk(c.width, c.height), x = o.getContext('2d'); x.drawImage(c, 0, 0);
+  x.globalCompositeOperation = 'source-atop'; x.globalAlpha = a === undefined ? 1 : a; x.fillStyle = col; x.fillRect(0, 0, c.width, c.height); return o;
+}
+function makeSpr(c) {
+  const f = flipC(c);
+  return { w: c.width, h: c.height, r: c, l: f, wr: tintC(c, '#ffffff'), wl: tintC(f, '#ffffff'), yr: tintC(c, '#fff27a'), yl: tintC(f, '#fff27a'),
+           gr: tintC(c, '#ffd23f', .5), gl: tintC(f, '#ffd23f', .5), sil: tintC(c, '#3a2c40') };
+}
+
+// ============================================================ sprites: fish
+function fishBasic(o) {
+  return paint(o.w, o.h, G => {
+    const cx = o.w * .56, cy = o.h / 2, rx = o.w * .34, ry = o.h * .36;
+    G.tri(cx - rx + 2, cy, 1, 1, 1, o.h - 1, o.fin);
+    G.tri(cx - rx * .6, cy - ry + 1.5, cx + rx * .35, cy - ry + 1.5, cx - rx * .35, 1, o.fin);
+    G.tri(cx - rx * .2, cy + ry - 1, cx + rx * .2, cy + ry - 1, cx - rx * .3, o.h - 1.5, o.fin);
+    G.ell(cx, cy, rx, ry, (x, y) => { const yy = y + .5; return yy > cy + ry * .3 ? o.belly : (o.back && yy < cy - ry * .35 ? o.back : o.body); });
+    if (o.stripes) for (const f of o.stripes) {
+      const sx = R(cx - rx + f * 2 * rx);
+      for (let y = 0; y < o.h; y++) for (const x of [sx, sx + 1]) {
+        const dx = (x + .5 - cx) / rx, dy = (y + .5 - cy) / ry;
+        if (dx * dx + dy * dy <= 1) G.set(x, y, o.stripeCol);
+      }
+    }
+    if (o.deco) o.deco(G, cx, cy, rx, ry);
+    const ex = R(cx + rx * .55), ey = R(cy - ry * .3);
+    G.set(ex, ey, OUT); if (o.w >= 16) G.set(ex - 1, ey, '#ffffff');
+  });
+}
+function eelSpr(body, belly, fin, spot, glow) {
+  return paint(30, 9, G => {
+    G.ell(3.5, 4.5, 3, 1.6, body); G.rect(3, 3, 23, 3, body); G.ell(25, 4.5, 4, 3, body);
+    G.rect(6, 2, 16, 1, fin); G.rect(4, 6, 20, 1, belly);
+    for (let x = 7; x < 23; x += 4) { G.set(x, 4, spot); if (glow) G.set(x + 1, 3, glow); }
+    G.set(26, 3, glow ? '#ffe14a' : OUT); G.set(28, 5, spot);
+  });
+}
+const SPRITES = {
+  // ---- 阳光浅滩
+  clown: () => fishBasic({ w: 16, h: 10, body: '#ff8a2a', belly: '#ffb262', fin: '#ff7a1a', stripes: [.26, .6], stripeCol: '#fff6ee' }),
+  sardine: () => fishBasic({ w: 14, h: 8, body: '#9cc0dc', back: '#4f7fab', belly: '#eef4f8', fin: '#6f98bf' }),
+  bream: () => fishBasic({ w: 18, h: 12, body: '#ffd23f', back: '#f5a623', belly: '#fff0a8', fin: '#f08a1a' }),
+  tang: () => fishBasic({ w: 17, h: 12, body: '#3a78ff', back: '#2450c8', belly: '#6fa0ff', fin: '#ffd23f',
+    deco: (G, cx, cy, rx) => { for (let x = R(cx - rx * .6); x <= R(cx + rx * .2); x++) { const y = R(cy - 1 + (x - cx) * .25); G.set(x, y, '#12245a'); G.set(x, y + 1, '#12245a'); } } }),
+  // ---- 彩虹珊瑚礁
+  eel: () => eelSpr('#c9d64a', '#eef08a', '#8e9e2a', '#6d7a1c'),
+  lion: () => paint(22, 16, G => {
+    for (let i = 0; i < 5; i++) { const bx = 7 + i * 2.4; G.tri(bx, 7, bx + 2, 7, bx + .5 - i * .3, 1, i % 2 ? '#d9412b' : '#ffe8d6'); }
+    G.tri(10, 10, 15, 10, 8, 15, '#e8604a'); G.tri(12, 10, 16, 10, 13, 15, '#ffe8d6');
+    G.tri(7, 8.5, 1, 3, 1, 14, '#e8604a');
+    G.ell(13, 8.5, 7, 4, (x, y) => x % 3 === 0 ? '#d9412b' : (y > 9 ? '#fff6ec' : '#ffe0cc'));
+    G.set(18, 7, '#ffffff'); G.set(19, 7, OUT);
+  }),
+  turtle: () => paint(22, 14, G => {
+    G.tri(13, 9, 17, 9, 19, 13, '#9ccf5e'); G.tri(4, 9, 7, 9, 1, 12, '#9ccf5e');
+    G.ell(19, 6.5, 2.8, 2.3, '#9ccf5e');
+    G.ell(10, 7, 8, 5.5, (x, y) => y > 9 ? '#e3d18e' : '#5aa84f');
+    [[6, 5], [9, 4], [12, 5], [8, 7], [11, 7]].forEach(([x, y]) => { G.set(x, y, '#3b7a3a'); G.set(x + 1, y, '#3b7a3a'); });
+    G.set(8, 3, '#8fd07a'); G.set(9, 3, '#8fd07a'); G.set(20, 6, OUT);
+  }),
+  parrot: () => fishBasic({ w: 20, h: 12, body: '#3ed6b0', back: '#2aa88a', belly: '#7ef0d0', fin: '#ff6fae', stripes: [.3, .56], stripeCol: '#ff9fce',
+    deco: (G, cx, cy, rx) => { G.set(R(cx + rx), R(cy), '#f4f4f4'); G.set(R(cx + rx) - 1, R(cy) + 1, '#f4f4f4'); } }),
+  // ---- 冰封海湾
+  icefish: () => fishBasic({ w: 16, h: 9, body: '#dff4ff', back: '#a8d8f0', belly: '#ffffff', fin: '#bfe6f8',
+    deco: (G, cx, cy) => { [[-2, 0], [1, 1], [-4, -1], [3, -1]].forEach(([dx, dy]) => G.set(R(cx + dx), R(cy + dy), '#8fc8e8')); } }),
+  penguin: () => paint(21, 12, G => {
+    G.tri(4, 6, 1, 3, 1, 9, '#ffb030');
+    G.ell(10, 6, 7.5, 4, (x, y) => y > 6 ? '#ffffff' : '#2a2f45');
+    G.ell(15.5, 5.5, 3, 3, '#2a2f45');
+    G.rect(18, 6, 2, 1, '#ffb030');
+    G.tri(8, 6, 13, 6, 10, 10, '#1b2035');
+    G.set(16, 4, '#ffffff'); G.set(17, 4, OUT);
+  }),
+  narwhal: () => paint(32, 12, G => {
+    G.tri(6, 6, 1, 2, 3, 6, '#8a98a8'); G.tri(6, 6, 3, 6, 1, 10, '#8a98a8');
+    G.tri(12, 8, 16, 8, 11, 11, '#8a98a8');
+    G.ell(14, 6.5, 10, 4, (x, y) => y > 7 ? '#d8e0e8' : '#9aa8b8');
+    [[9, 4], [12, 5], [15, 4], [18, 5], [11, 6]].forEach(([x, y]) => G.set(x, y, '#6f7f90'));
+    G.rect(24, 5, 7, 1, '#f4efe0'); for (let x = 25; x < 31; x += 2) G.set(x, 5, '#c8c0a8');
+    G.set(20, 5, OUT);
+  }),
+  cod: () => fishBasic({ w: 18, h: 10, body: '#b8a878', back: '#8a7a50', belly: '#f0ead8', fin: '#9a8a60',
+    deco: (G, cx, cy, rx) => { [[-3, -1], [0, -2], [2, 0], [-1, 0]].forEach(([dx, dy]) => G.set(R(cx + dx), R(cy + dy), '#7a6a40')); G.set(R(cx + rx) - 1, R(cy) + 3, '#7a6a40'); } }),
+  // ---- 沉船墓场
+  bonefish: () => paint(20, 11, G => {
+    const B1 = '#f0ead8', B2 = '#c8bfa8';
+    G.tri(4, 5.5, 1, 2, 1, 9, B2);
+    G.rect(4, 5, 9, 1, B1);
+    for (let x = 6; x < 13; x += 2) G.rect(x, 3, 1, 5, B1);
+    G.ell(15.5, 5.5, 3.5, 3.5, B1);
+    G.set(16, 4, '#7fffd4'); G.set(17, 4, OUT);
+    G.rect(17, 7, 2, 1, B2);
+  }),
+  chest: () => paint(18, 13, G => {
+    G.tri(4, 7, 1, 4, 1, 10, '#6fb8c8');
+    G.rect(4, 5, 11, 7, '#8a5a2a');
+    G.rect(4, 2, 11, 2, '#a86a32');
+    G.rect(5, 4, 9, 1, '#ffe14a');
+    G.rect(4, 5, 11, 1, '#ffd23f'); G.rect(9, 5, 1, 7, '#ffd23f'); G.set(9, 8, '#fff6c0');
+    G.set(11, 4, OUT); G.set(13, 4, OUT);
+    G.tri(9, 12, 13, 12, 11, 12.9, '#6fb8c8');
+  }),
+  octo: () => paint(16, 14, G => {
+    for (let i = 0; i < 4; i++) { const x0 = 3 + i * 3; for (let y = 8; y < 13; y++) G.set(x0 + (y % 2 && i % 2 ? 1 : 0), y, '#ff8fb0'); G.set(x0 + 1, 12, '#ff8fb0'); }
+    G.ell(8, 5.5, 5.5, 4.5, (x, y) => (x < 6 && y < 4) ? '#ffc0d4' : '#ff8fb0');
+    G.set(6, 6, OUT); G.set(10, 6, OUT); G.set(5, 7, '#ff5a8a'); G.set(11, 7, '#ff5a8a');
+  }),
+  seahorse: () => paint(12, 17, G => {
+    const C = '#ffb84a', D = '#e0902a';
+    G.ell(7, 3.5, 2.5, 2.2, C); G.rect(8, 3, 3, 1, C);
+    G.ell(5.5, 8, 3, 3.5, C);
+    [[5, 11], [5, 12], [6, 13], [7, 14], [6, 15], [5, 15], [4, 14]].forEach(p => G.set(p[0], p[1], C));
+    G.set(3, 6, D); G.set(3, 8, D); G.set(4, 10, D); G.set(6, 1, D);
+    G.set(6, 8, '#ffd88a'); G.set(6, 9, '#ffd88a'); G.set(7, 3, OUT);
+  }),
+  // ---- 熔岩热泉
+  armor: () => fishBasic({ w: 18, h: 11, body: '#6a5a58', back: '#4a3e3e', belly: '#9a8078', fin: '#e0602a', stripes: [.25, .5, .75], stripeCol: '#4a3e3e' }),
+  ruby: () => fishBasic({ w: 15, h: 10, body: '#e8284a', back: '#b01838', belly: '#ff8aa0', fin: '#ff5a7a',
+    deco: (G, cx, cy) => { G.set(R(cx - 2), R(cy - 1), '#ffffff'); G.set(R(cx + 1), R(cy + 1), '#ffd0da'); } }),
+  lavaeel: () => eelSpr('#3a2a2a', '#5a3a30', '#2a1e1e', '#ff8a2a', '#ffd23f'),
+  shrimp: () => paint(18, 11, G => {
+    G.tri(3, 6, 1, 9, 4, 10, '#ff8a5a');
+    [[5, 6, 2.5], [8, 5, 2.8], [11, 4.5, 3], [14, 5, 2.8]].forEach(([x, y, r], i) => G.ell(x, y, r, r * .9, i % 2 ? '#ff6a3a' : '#ff7f4a'));
+    for (const x of [8, 10, 12]) G.set(x, 8, '#d84a2a');
+    G.set(16, 3, '#ff6a3a'); G.set(17, 2, '#ff6a3a'); G.set(16, 2, '#ff6a3a');
+    G.set(15, 4, OUT);
+  }),
+  // ---- 无光深渊
+  angler: () => paint(22, 16, G => {
+    G.tri(5, 9, 1, 4, 1, 14, '#3a3550');
+    G.ell(11, 9.5, 8, 5.5, (x, y) => y > 11 ? '#6a6384' : '#4a4462');
+    [[12, 4], [13, 3], [14, 2], [15, 2], [16, 2]].forEach(([x, y]) => G.set(x, y, '#4a4462'));
+    G.rect(17, 1, 2, 2, '#fff27a');
+    G.rect(15, 11, 5, 1, OUT); G.set(16, 10, '#ffffff'); G.set(18, 10, '#ffffff'); G.set(17, 12, '#ffffff'); G.set(19, 12, '#ffffff');
+    G.set(15, 7, '#ffffff'); G.set(16, 7, '#ff5a5a');
+  }),
+  sword: () => paint(34, 12, G => {
+    G.tri(9, 6, 1, 1, 4, 6, '#2a4a8a'); G.tri(9, 6, 4, 6, 1, 11, '#2a4a8a');
+    G.tri(11, 4, 20, 4, 12, .5, '#2a4a8a');
+    G.ell(17, 6.5, 10, 3.6, (x, y) => y > 7 ? '#dbe8ff' : '#3a5fa8');
+    G.rect(26, 6, 7, 1, '#b8c6d8');
+    G.set(23, 5, '#ffffff'); G.set(24, 5, OUT);
+  }),
+  jelly: () => paint(14, 18, G => {
+    for (let i = 0; i < 5; i++) { const x0 = 3 + i * 2; for (let y = 8; y < 17; y++) G.set(x0 + R(Math.sin(y * .8 + i) * .7), y, i % 2 ? '#c07ae8' : '#e4b5ff'); }
+    G.ell(7, 6.5, 6, 5.5, (x, y) => y <= 8 ? (y < 4 && x < 6 ? '#fbe8ff' : '#d99bff') : null);
+    G.rect(2, 8, 10, 1, '#b67ae0');
+    G.set(5, 6, OUT); G.set(8, 6, OUT);
+  }),
+  oar: () => paint(38, 10, G => {
+    G.rect(4, 2, 28, 1, '#e8453c');
+    G.tri(33, 3, 36, .5, 31, .5, '#e8453c');
+    G.ell(19, 5.5, 17, 2.8, (x, y) => y > 5 ? '#f4f6fa' : '#c9d0dc');
+    for (let x = 6; x < 32; x += 3) G.set(x, 5, '#8a93a6');
+    G.set(33, 4, OUT);
+  }),
+};
+
+// ============================================================ species, zones, bosses
+// buff: which run stat it improves. lvl 2 = stronger version. cm = typical size.
+const SP = {
+  clown:    { name: '小丑鱼',   buff: 'reel',   lvl: 1, label: '收线更快', val: 8,  pow: .55, freq: .8,  spd: 22, cm: 9 },
+  sardine:  { name: '沙丁鱼',   buff: 'bite',   lvl: 1, label: '咬钩更快', val: 5,  pow: .45, freq: 1,   spd: 26, cm: 15 },
+  bream:    { name: '黄金鲷',   buff: 'gold',   lvl: 1, label: '金币更多', val: 14, pow: .65, freq: .85, spd: 22, cm: 30 },
+  tang:     { name: '蓝唐王',   buff: 'line',   lvl: 1, label: '鱼线更韧', val: 10, pow: .6,  freq: .9,  spd: 24, cm: 25 },
+  eel:      { name: '电鳗',     buff: 'zap',    lvl: 1, label: '放电麻痹', val: 18, pow: .7,  freq: 1,   spd: 28, cm: 120, mouth: [28, 5] },
+  lion:     { name: '狮子鱼',   buff: 'crit',   lvl: 1, label: '暴击拉扯', val: 22, pow: .75, freq: .9,  spd: 24, cm: 35, mouth: [20, 9] },
+  turtle:   { name: '海龟',     buff: 'heal',   lvl: 1, label: '生命+1',   val: 15, pow: .6,  freq: .7,  spd: 18, cm: 80, mouth: [21, 7], wt: .6 },
+  parrot:   { name: '鹦鹉鱼',   buff: 'calm',   lvl: 1, label: '鱼更温顺', val: 20, pow: .7,  freq: .9,  spd: 24, cm: 50 },
+  icefish:  { name: '冰鱼',     buff: 'slow',   lvl: 1, label: '挣扎变短', val: 26, pow: .7,  freq: .95, spd: 26, cm: 30 },
+  penguin:  { name: '企鹅',     buff: 'shield', lvl: 1, label: '断线护盾', val: 30, pow: .7,  freq: .9,  spd: 30, cm: 60, mouth: [19, 6], wt: .8 },
+  narwhal:  { name: '独角鲸',   buff: 'crit',   lvl: 2, label: '暴击更猛', val: 38, pow: .8,  freq: 1,   spd: 30, cm: 400, mouth: [31, 5] },
+  cod:      { name: '北极鳕',   buff: 'bite',   lvl: 2, label: '咬钩超快', val: 28, pow: .7,  freq: 1,   spd: 28, cm: 70 },
+  bonefish: { name: '骷髅鱼',   buff: 'fever',  lvl: 1, label: '开局狂收', val: 40, pow: .75, freq: 1,   spd: 28, cm: 40, mouth: [18, 6] },
+  chest:    { name: '宝箱鱼',   buff: 'lucky',  lvl: 1, label: '闪光几率', val: 45, pow: .7,  freq: .9,  spd: 24, cm: 35, mouth: [15, 8], wt: .8 },
+  octo:     { name: '章鱼宝宝', buff: 'calm',   lvl: 2, label: '鱼超温顺', val: 42, pow: .75, freq: 1,   spd: 26, cm: 30, mouth: [8, 9] },
+  seahorse: { name: '海马',     buff: 'heal',   lvl: 1, label: '生命+1',   val: 35, pow: .6,  freq: .8,  spd: 20, cm: 18, mouth: [10, 3], wt: .6 },
+  armor:    { name: '岩甲鱼',   buff: 'shield', lvl: 2, label: '双层护盾', val: 55, pow: .85, freq: 1,   spd: 30, cm: 60 },
+  ruby:     { name: '红宝石鱼', buff: 'lucky',  lvl: 2, label: '闪光更多', val: 60, pow: .8,  freq: 1,   spd: 30, cm: 28, wt: .8 },
+  lavaeel:  { name: '熔岩鳗',   buff: 'fever',  lvl: 2, label: '狂收更久', val: 58, pow: .85, freq: 1.05, spd: 32, cm: 150, mouth: [28, 5] },
+  shrimp:   { name: '火山虾',   buff: 'slow',   lvl: 2, label: '挣扎超短', val: 50, pow: .75, freq: 1.1, spd: 30, cm: 20, mouth: [17, 6] },
+  angler:   { name: '灯笼鮟鱇', buff: 'gold',   lvl: 2, label: '金币翻倍', val: 70, pow: .8,  freq: 1,   spd: 28, cm: 60, mouth: [19, 11] },
+  sword:    { name: '旗鱼',     buff: 'reel',   lvl: 2, label: '收线超快', val: 80, pow: .9,  freq: 1.1, spd: 34, cm: 300, mouth: [32, 6] },
+  jelly:    { name: '幽灵水母', buff: 'zap',    lvl: 2, label: '放电更猛', val: 65, pow: .7,  freq: .85, spd: 20, cm: 45, mouth: [7, 9] },
+  oar:      { name: '皇带鱼',   buff: 'line',   lvl: 2, label: '鱼线超韧', val: 90, pow: .85, freq: 1,   spd: 30, cm: 800, mouth: [35, 6] },
+};
+const SPR = {};
+for (const k in SP) { const c = SPRITES[k](); SPR[k] = makeSpr(c); if (!SP[k].mouth) SP[k].mouth = [c.width - 2, R(c.height * .55)]; }
+
+const ZONES = [
+  { name: '阳光浅滩', sky: ['#7fcfff', '#9ad9ff', '#b5e4ff', '#cfeeff'],
+    water: ['#5ed0d6', '#46bcd0', '#35a5c6', '#2a8cba', '#2273a6', '#1d5f94'],
+    sand: '#f0d49a', sand2: '#d8b676', hl: '#e6fbff', weed: ['#3fae5a', '#2e8a47'], orb: 'sun', clouds: true, shafts: true,
+    fish: ['clown', 'sardine', 'bream', 'tang'], boss: 'puffer', depth: [140, 228], pow: .62 },
+  { name: '彩虹珊瑚礁', sky: ['#ff9a76', '#ffb488', '#ffcd9c', '#ffe2b8'],
+    water: ['#3fa6d6', '#3290c8', '#2a7bb8', '#2466a6', '#1e5292', '#193f7c'],
+    sand: '#d8a574', sand2: '#b78455', hl: '#ffe9d2', weed: ['#5aa84f', '#3f7f3a'], orb: 'sun', clouds: true, shafts: true,
+    fish: ['eel', 'lion', 'turtle', 'parrot'], boss: 'squid', depth: [160, 256], pow: .84 },
+  { name: '冰封海湾', sky: ['#a9cde8', '#bfdcf0', '#d3e7f5', '#e6f2fa'],
+    water: ['#8fd0e8', '#74bcdc', '#5aa6cf', '#4690c0', '#387aae', '#2c649a'],
+    sand: '#e8f0f6', sand2: '#b8cadb', hl: '#ffffff', weed: ['#6fb8c8', '#4f98a8'], orb: 'sun', clouds: true, shafts: true, fx: 'snow', floes: true,
+    fish: ['icefish', 'penguin', 'narwhal', 'cod'], boss: 'crab', depth: [160, 262], pow: 1.06 },
+  { name: '沉船墓场', sky: ['#3e4a5a', '#4d5a68', '#5e6a76', '#707a84'],
+    water: ['#3f7a78', '#346a6a', '#2a5a5c', '#214a4e', '#193c42', '#123036'],
+    sand: '#8a8266', sand2: '#6e6850', hl: '#cfe8e0', weed: ['#5a7a4a', '#3f5a36'], orb: 'moon', shafts: true, fx: 'fog', stars: 8,
+    fish: ['bonefish', 'chest', 'octo', 'seahorse'], boss: 'ghost', depth: [165, 262], pow: 1.28 },
+  { name: '熔岩热泉', sky: ['#3a1420', '#5a1e24', '#7a2a26', '#9a3a2a'],
+    water: ['#6a3a4a', '#5a3040', '#4a2636', '#3a1e2e', '#2c1624', '#1e101a'],
+    sand: '#3a2a2a', sand2: '#5a3a30', hl: '#ffb080', weed: ['#c05a30', '#8a3a20'], fx: 'ash',
+    vents: [[30, SEABED - 14], [148, SEABED - 16]],
+    fish: ['armor', 'ruby', 'lavaeel', 'shrimp'], boss: 'serpent', depth: [165, 266], pow: 1.5 },
+  { name: '无光深渊', sky: ['#141233', '#1b1942', '#242150', '#2f2a5e'],
+    water: ['#233c6e', '#1c325f', '#162850', '#111f42', '#0c1734', '#081026'],
+    sand: '#2c2644', sand2: '#3d3560', hl: '#8fa8ff', weed: ['#2fb8a0', '#1f8a78'], orb: 'moon', stars: 26, glowWeed: true,
+    fish: ['angler', 'sword', 'jelly', 'oar'], boss: 'kraken', depth: [170, 270], pow: 1.85 },
+];
+ZONES.forEach((z, i) => z.fish.forEach(k => { SP[k].zone = i; }));
+
+const SPRB = {
+  puffer: makeSpr(paint(42, 34, G => {
+    G.tri(8, 17, 1, 9, 1, 25, '#e0b050');
+    G.tri(18, 5, 26, 5, 20, 1, '#e0b050');
+    G.ell(22, 17, 15, 13, (x, y) => y > 21 ? '#fff1c4' : '#f2d27a');
+    [[14, 10], [20, 8], [26, 10], [12, 15], [18, 13], [24, 14], [30, 9]].forEach(([x, y]) => G.set(x, y, '#c89a44'));
+    G.ell(31, 13, 3.5, 3.5, '#ffffff'); G.rect(32, 12, 2, 3, OUT);
+    G.ell(24, 22, 3, 2, '#f0c060');
+    G.rect(36, 18, 2, 2, '#d4705a');
+  })),
+  pufferBig: makeSpr(paint(58, 58, G => {
+    const cx = 29, cy = 29, r = 21;
+    for (let i = 0; i < 18; i++) {
+      const a = i / 18 * Math.PI * 2, bx = cx + Math.cos(a) * r * .95, by = cy + Math.sin(a) * r * .95;
+      const tx = cx + Math.cos(a) * (r + 5), ty = cy + Math.sin(a) * (r + 5), px = -Math.sin(a) * 2.2, py = Math.cos(a) * 2.2;
+      G.tri(bx + px, by + py, bx - px, by - py, tx, ty, '#e0b050');
+    }
+    G.ell(cx, cy, r, r, (x, y) => y > cy + 5 ? '#fff1c4' : '#f2d27a');
+    [[20, 16], [27, 12], [34, 15], [17, 24], [24, 21], [31, 22]].forEach(([x, y]) => { G.set(x, y, '#c89a44'); G.set(x + 1, y, '#c89a44'); });
+    G.ell(39, 22, 4, 4, '#ffffff'); G.rect(40, 21, 2, 3, OUT);
+    for (let i = 0; i < 9; i++) { G.set(34 + i, 15 + Math.floor(i / 3), OUT); G.set(34 + i, 16 + Math.floor(i / 3), OUT); }
+    G.ell(47, 31, 2.5, 2.2, '#d4705a'); G.set(47, 31, OUT);
+  })),
+  squid: makeSpr(paint(36, 42, G => {
+    G.tri(18, 1, 5, 24, 31, 24, '#e05a50');
+    G.tri(9, 8, 1, 16, 9, 19, '#c94a42'); G.tri(27, 8, 35, 16, 27, 19, '#c94a42');
+    G.ell(18, 27, 13, 12, '#e05a50');
+    G.map((x, y, c) => c === '#e05a50' ? ((x * 7 + y * 11) % 13 === 0 ? '#b53b3b' : (x > 9 && x < 15 && y > 6 && y < 20 ? '#f07a6e' : c)) : c);
+    G.ell(12, 29, 4, 4.5, '#ffe07a'); G.ell(24, 29, 4, 4.5, '#ffe07a'); G.rect(12, 28, 2, 3, OUT); G.rect(24, 28, 2, 3, OUT);
+  })),
+  crab: makeSpr(paint(58, 42, G => {
+    const S = '#6fb8e0', D = '#3f88b8', L = '#a8dcf4';
+    for (let i = 0; i < 3; i++) {
+      G.tri(16 - i * 3, 27 + i * 2, 19 - i * 3, 29 + i * 2, 4 - i, 36 + i * 2, D);
+      G.tri(42 + i * 3, 27 + i * 2, 39 + i * 3, 29 + i * 2, 54 + i, 36 + i * 2, D);
+    }
+    G.tri(15, 24, 19, 27, 8, 13, S); G.tri(43, 24, 39, 27, 50, 13, S);
+    G.ell(8, 9, 6, 5.5, S); G.ell(50, 9, 6, 5.5, S);
+    for (let i = 0; i < 5; i++) { G.set(3 + i, 4 + Math.floor(i * .7), D); G.set(54 - i, 4 + Math.floor(i * .7), D); }
+    G.ell(29, 27, 17, 11, (x, y) => y < 24 ? L : S);
+    G.map((x, y, c) => c === S && (x * 5 + y * 3) % 17 === 0 ? D : c);
+    G.tri(15, 21, 20, 20, 16, 13, '#e8f8ff'); G.tri(38, 20, 43, 21, 42, 13, '#e8f8ff'); G.tri(27, 17, 31, 17, 29, 10, '#e8f8ff');
+    G.rect(24, 13, 1, 4, D); G.rect(34, 13, 1, 4, D);
+    G.ell(24.5, 12, 2.2, 2.2, '#ffffff'); G.ell(34.5, 12, 2.2, 2.2, '#ffffff'); G.set(24, 12, OUT); G.set(34, 12, OUT);
+    G.rect(26, 31, 7, 1, D); G.set(25, 30, D); G.set(33, 30, D);
+  })),
+  ghost: makeSpr(paint(66, 28, G => {
+    const A = '#bfe8e0', D = '#8ac8c0', Bl = '#eafff8';
+    G.tri(14, 14, 1, 2, 6, 14, D); G.tri(14, 14, 6, 14, 2, 25, D);
+    G.tri(28, 9, 40, 9, 31, 1, D);
+    G.tri(34, 19, 42, 19, 31, 26, D);
+    G.ell(37, 14, 24, 7.5, (x, y) => y > 16 ? Bl : A);
+    for (const x of [47, 49, 51]) G.rect(x, 11, 1, 4, D);
+    G.ell(54, 11, 1.8, 1.8, '#7fffd4'); G.set(54, 11, '#ffffff');
+    G.rect(51, 17, 9, 1, OUT); for (let x = 52; x < 60; x += 2) G.set(x, 18, '#ffffff');
+  })),
+  serpent: makeSpr(paint(34, 24, G => {
+    const Dk = '#6a3e3a', Md = '#8a5448', Cr = '#ffb03a';
+    G.tri(8, 7, 13, 8, 6, .5, '#8a6a5a'); G.tri(12, 7, 16, 8, 12, 1, '#8a6a5a');
+    G.ell(13, 13, 10, 8, (x, y) => y > 15 ? Md : Dk);
+    G.ell(24, 15, 8, 5.5, (x, y) => y > 16 ? Md : Dk);
+    [[7, 10], [8, 11], [11, 9], [15, 12], [16, 13], [22, 12], [10, 16], [5, 14]].forEach(p => G.set(p[0], p[1], Cr));
+    G.ell(20, 11, 2.4, 2, '#ffe14a'); G.rect(20, 10, 1, 3, OUT);
+    G.rect(23, 18, 9, 1, OUT); G.set(25, 17, '#ffffff'); G.set(28, 17, '#ffffff'); G.set(30, 17, '#ffffff');
+    G.set(31, 13, Cr);
+  })),
+  kraken: makeSpr(paint(88, 60, G => {
+    G.ell(44, 40, 38, 31, (x, y) => { if (y > 57) return null; if ((x - 28) ** 2 + (y - 20) ** 2 < 70) return '#8b5bb3'; if ((x * 13 + y * 7) % 23 === 0) return '#9a6cc4'; return '#6b3d8f'; });
+    G.ell(27, 36, 8, 6.5, '#ffdf4a'); G.ell(61, 36, 8, 6.5, '#ffdf4a');
+    G.rect(26, 31, 2, 11, OUT); G.rect(60, 31, 2, 11, OUT);
+    G.set(23, 33, '#fff8c0'); G.set(57, 33, '#fff8c0');
+    for (let i = 0; i < 11; i++) { const d = Math.floor(i / 3.5); G.set(18 + i, 26 + d, OUT); G.set(18 + i, 27 + d, OUT); G.set(70 - i, 26 + d, OUT); G.set(70 - i, 27 + d, OUT); }
+    G.tri(39, 47, 49, 47, 44, 55, '#2b1d14');
+  })),
+};
+// y0/y1: where the boss sits at 0% and 100% progress. card: sprite + facing used on the catch card and in the dex.
+const BOSSES = {
+  puffer:  { name: '巨型河豚',   len: 480, pow: .75, spd: 22, tele: .55, calm: () => rand(1.6, 2.6), dash: () => rand(.9, 1.3), y0: 262, y1: 165, val: 120,  card: () => SPRB.puffer.l },
+  squid:   { name: '大王乌贼',   len: 680, pow: .95, spd: 30, tele: .45, calm: () => rand(1.1, 2.1), dash: () => rand(.8, 1.2),  y0: 225, y1: 140, val: 260,  card: () => SPRB.squid.r },
+  crab:    { name: '冰霜巨蟹',   len: 800, pow: 1.0, spd: 32, tele: .4,  calm: () => rand(1.3, 2.2), dash: () => rand(.45, .7), y0: 250, y1: 165, val: 400,  card: () => SPRB.crab.r },
+  ghost:   { name: '幽灵鲨',     len: 920, pow: 1.05, spd: 32, tele: .5, calm: () => rand(1.1, 2),   dash: () => rand(.7, 1.1),  y0: 235, y1: 150, val: 520,  card: () => SPRB.ghost.l },
+  serpent: { name: '熔岩海蛇',   len: 1040, pow: 1.1, spd: 34, tele: .5,  calm: () => rand(1, 1.9),   dash: () => rand(.7, 1.1),  y0: 232, y1: 150, val: 700,  card: () => SPRB.serpent.l },
+  kraken:  { name: '深渊克拉肯', len: 1350, pow: 1.4, spd: 34, tele: .42, calm: () => rand(.8, 1.6),  dash: () => rand(.7, 1.1),  y0: 245, y1: 165, val: 1000, card: () => SPRB.kraken.r },
+};
+const BOSS_ORDER = ZONES.map(z => z.boss);
+const FISH_ORDER = ZONES.flatMap(z => z.fish);
+
+// ============================================================ sprites: ui, cat, props
+const I = {};
+const HEART = ['.XX.XX.', 'XWXXXXX', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'];
+I.heart = rows(HEART, { X: '#ff4d6d', W: '#ffd0da' });
+I.heartE = rows(HEART, { X: '#4a4f68', W: '#5d6380' });
+I.coin = paint(9, 9, G => { G.ell(4.5, 4.5, 3.6, 3.6, '#e8961e'); G.ell(4.5, 4.5, 2.5, 2.5, '#ffd23f'); G.set(3, 3, '#fff6c0'); });
+I.reel = rows(['X..X...', 'XX.XX..', 'XXXXXX.', 'XXXXXXX', 'XXXXXX.', 'XX.XX..', 'X..X...'], { X: '#6fe3ff' });
+I.bite = rows(['...XX..', '....X..', '....X..', 'X...X..', 'X...X..', 'XX.XX..', '.XXX...'], { X: '#e6ecf2' });
+I.gold = rows(['..XX...', '.XXXX..', '..XX...', '.XYYX..', 'XYYYYX.', 'XYYYYX.', '.XXXX..'], { X: '#c07a1a', Y: '#ffd23f' });
+I.line = rows(['XXXXXXX', 'XWWWWWX', 'XWWWWWX', 'XWWWWWX', '.XWWWX.', '..XWX..', '...X...'], { X: '#8aa4bd', W: '#e2edf6' });
+I.zap = rows(['...XXX.', '..XXX..', '.XXX...', 'XXXXXX.', '...XX..', '..XX...', '.X.....'], { X: '#ffe14a' });
+I.crit = rows(['...X...', 'X..X..X', '.XXXXX.', 'XXXXXXX', '.XXXXX.', 'X..X..X', '...X...'], { X: '#ff5a4a' });
+I.calm = rows(['...X...', '..XXX..', '.XXXXX.', 'XXXWXXX', 'XXWXXXX', '.XXXXX.', '..XXX..'], { X: '#7ee0b0', W: '#e6fff4' });
+I.slow = rows(['...X...', '.X.X.X.', '..XXX..', 'XXXXXXX', '..XXX..', '.X.X.X.', '...X...'], { X: '#bfe6ff' });
+I.shield = rows(['..XXX..', '.XWFFX.', 'XWFFFFX', 'XFFFFFX', 'XFFFFFX', '.XFFFX.', '..XXX..'], { X: '#4fb0f0', F: '#bfe8ff', W: '#ffffff' });
+I.fever = rows(['...X...', '..XX...', '..XXX.X', '.XXYXXX', 'XXYYYXX', 'XXYYYXX', '.XXYXX.'], { X: '#ff6a2a', Y: '#ffe14a' });
+I.lucky = rows(['...X...', '..XXX..', 'XXXWXXX', '.XXXXX.', '..XXX..', '.XX.XX.', '.X...X.'], { X: '#ffc83a', W: '#ffffff' });
+I.heal = I.heart;
+I.skull = rows(['.XXXXX.', 'XXXXXXX', 'X.XXX.X', 'XXXXXXX', 'XXX.XXX', '.XXXXX.', '.X.X.X.'], { X: '#f0e6d2' });
+I.bang = rows(['XXX', 'XXX', 'XXX', 'XXX', '.X.', '...', 'XXX'], { X: '#ff3b3b' });
+I.bangY = rows(['XXX', 'XXX', 'XXX', 'XXX', '.X.', '...', 'XXX'], { X: '#ffe14a' });
+I.sound = rows(['...X..X..', '..XX...X.', 'XXXX.X.X.', 'XXXX.X.X.', 'XXXX.X.X.', '..XX...X.', '...X..X..'], { X: '#ffffff' });
+I.mute = rows(['...X.....', '..XX.....', 'XXXX.X.X.', 'XXXX..X..', 'XXXX.X.X.', '..XX.....', '...X.....'], { X: '#ffffff' });
+I.bobber = rows(['.R.', 'RRR', 'WWW', '.W.'], { R: '#e8453c', W: '#ffffff' });
+I.hook = rows(['.XX', '..X', 'X.X', '.X.'], { X: '#d8dee6' }, false);
+I.star = rows(['.X.', 'XXX', '.X.'], { X: '#ffe14a' });
+I.hand = rows([
+  '...XX.....', '..XWWX....', '..XWWX....', '..XWWXXX..', '..XWWXWWXX', 'XXXWWWWWWX',
+  'XWXWWWWWWX', 'XWWWWWWWWX', '.XWWWWWWWX', '..XWWWWWX.', '...XXXXX..'], { X: OUT, W: '#ffffff' }, false);
+I.boat = paint(36, 12, G => {
+  G.tri(1, 3, 6, 10.5, 6, 3, '#a8683a'); G.tri(35, 3, 30, 10.5, 30, 3, '#a8683a'); G.rect(6, 3, 24, 8, '#a8683a');
+  G.rect(1, 3, 34, 1, '#c98a52');
+  G.map((x, y, c) => y === 6 ? '#f2e2c0' : (y >= 9 ? '#7a4a28' : c));
+});
+const CAT_O = '#f5a04a', CAT_D = '#d97a2a';
+// Cat angler in a bucket hat and fishing vest, upper body only (the boat rim hides row 22 down).
+// Paw holding the rod is at (20,15).
+function catSpr(face) {
+  return paint(23, 24, G => {
+    const Wt = '#fff3e0', P = '#ff9fb0', VEST = '#5a8a4a', VEST_D = '#3f6a36', HAT = '#c8b068', HAT_D = '#a08440';
+    // torso: vest over shirt
+    G.rect(7, 15, 9, 8, VEST); G.rect(10, 15, 3, 8, '#efe2c2');
+    G.rect(8, 18, 2, 2, VEST_D); G.rect(14, 18, 1, 2, VEST_D);
+    // far arm resting on the rim
+    G.rect(5, 16, 2, 5, CAT_O); G.rect(5, 21, 2, 1, Wt);
+    // head
+    G.ell(11.5, 11, 6, 4.5, CAT_O);
+    G.set(6, 11, CAT_D); G.set(6, 12, CAT_D); G.set(7, 13, CAT_D);
+    G.ell(14.5, 13, 2.6, 1.6, Wt);
+    G.set(16, 12, P); G.set(15, 14, '#c06a5a');
+    const e = {
+      normal: [[12, 10], [12, 11], [15, 10], [15, 11]],
+      blink:  [[11, 11], [12, 11], [15, 11], [16, 11]],
+      happy:  [[11, 11], [12, 10], [13, 11], [14, 11], [15, 10], [16, 11]],
+      sad:    [[11, 10], [12, 11], [11, 12], [16, 10], [15, 11], [16, 12]],
+    }[face];
+    e.forEach(([x, y]) => G.set(x, y, OUT));
+    if (face === 'happy') { G.set(10, 13, '#ff8a9a'); G.set(9, 13, '#ff8a9a'); }
+    // bucket hat, ears poking through the crown
+    G.ell(11.5, 5, 5.2, 3.2, HAT);
+    G.rect(7, 6, 10, 1, '#8a6a3a');
+    G.tri(7, 4, 10, 4, 7.5, .5, CAT_O); G.tri(13, 4, 16, 4, 15.5, .5, CAT_O);
+    G.set(8, 3, P); G.set(15, 3, P);
+    G.rect(4, 7, 16, 1, HAT); G.rect(4, 8, 16, 1, HAT_D); G.set(3, 8, HAT_D); G.set(20, 8, HAT_D);
+    // near arm reaching forward to the rod
+    G.rect(15, 16, 4, 2, CAT_O); G.rect(19, 15, 2, 2, Wt);
+  });
+}
+I.cat = { normal: catSpr('normal'), blink: catSpr('blink'), happy: catSpr('happy'), sad: catSpr('sad') };
+// Question-mark tail rising behind the cat; frame b lifts the tip for a little flick.
+const TAIL = ['.CCCC....', 'CC..CC...', 'C....CC..', 'D....CC..', '......CC.', '......CC.', '......CC.', '.......CC', '.......CC', '.......CC'];
+I.tail = rows(TAIL, { C: CAT_O, D: CAT_D });
+I.tailB = rows(TAIL.map((r, i) => i === 3 ? '.' + r.slice(1) : r), { C: CAT_O, D: CAT_D });
+I.cloud = paint(26, 11, G => { G.ell(8, 6.5, 6, 3.5, '#ffffff'); G.ell(14, 5, 6.5, 4.2, '#ffffff'); G.ell(20, 7, 4.5, 3, '#ffffff'); G.map((x, y) => y >= 8 ? '#dcefff' : null); }, false);
+I.sun = paint(20, 20, G => { G.ell(10, 10, 8, 8, '#ffd84a'); G.ell(10, 10, 6, 6, '#ffe98a'); G.set(7, 6, '#fffbe0'); G.set(8, 6, '#fffbe0'); }, false);
+I.moon = paint(16, 16, G => { G.ell(8, 8, 7, 7, '#f1eecf'); [[5, 6], [6, 6], [9, 10], [10, 4]].forEach(([x, y]) => G.set(x, y, '#d8d3a8')); }, false);
+I.rock = paint(20, 12, G => G.ell(10, 7, 9, 5, (x, y) => y < 6 ? '#a8b4bf' : '#7f8c98'));
+I.rockD = paint(42, 24, G => G.ell(21, 14, 20, 10, (x, y) => y < 10 ? '#3e3866' : '#2c2750'));
+I.floe = paint(20, 6, G => { G.rect(1, 1, 18, 3, '#f4fbff'); G.rect(3, 4, 14, 1, '#bfe0f2'); G.rect(2, 1, 10, 1, '#ffffff'); }, true);
+I.ship = paint(76, 42, G => {
+  G.tri(2, 22, 74, 22, 12, 40, '#4a3a2a'); G.tri(74, 22, 66, 40, 12, 40, '#4a3a2a');
+  G.map((x, y, c) => y % 4 === 0 ? '#3a2c20' : c);
+  [[26, 29], [38, 29], [50, 29]].forEach(([x, y]) => G.ell(x, y, 2.2, 2.2, '#16262a'));
+  for (let i = 0; i < 22; i++) { G.set(40 + R(i * .8), 22 - i, '#3a2c20'); G.set(41 + R(i * .8), 22 - i, '#3a2c20'); }
+  G.rect(48, 6, 14, 1, '#3a2c20');
+  G.tri(50, 7, 60, 7, 55, 16, '#6a6450');
+});
+I.barrel = paint(12, 10, G => { G.rect(1, 1, 10, 8, '#7a5230'); G.rect(1, 3, 10, 1, '#4a3a2a'); G.rect(1, 6, 10, 1, '#4a3a2a'); });
+I.vent = paint(26, 20, G => { G.tri(1, 19, 25, 19, 13, 2, '#2a1e1e'); G.map((x, y, c) => (x + y) % 5 === 0 ? '#3a2828' : c); G.rect(11, 2, 4, 3, '#ff7a2a'); G.set(12, 3, '#ffe14a'); });
+
+// ============================================================ backgrounds
+function bands(x, y0, y1, cols) {
+  const n = cols.length, h = (y1 - y0) / n;
+  for (let i = 0; i < n; i++) { x.fillStyle = cols[i]; x.fillRect(0, R(y0 + i * h), W, Math.ceil(h) + 1); }
+  for (let i = 1; i < n; i++) {
+    const by = R(y0 + i * h); x.fillStyle = cols[i - 1];
+    for (let px = 0; px < W; px++) { if (px % 2 === 0) x.fillRect(px, by, 1, 1); if (px % 4 === 1) x.fillRect(px, by + 1, 1, 1); }
+  }
+}
+function thickLine(x, x0, y0, x1, y1, w, col) {
+  const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0)); x.fillStyle = col;
+  for (let i = 0; i <= n; i++) { const t = n ? i / n : 0; x.fillRect(R(lerp(x0, x1, t) - w / 2), R(lerp(y0, y1, t)), w, w); }
+}
+function branch(x, px, py, a, len, d, col) {
+  const x2 = px + Math.cos(a) * len, y2 = py + Math.sin(a) * len;
+  thickLine(x, px, py, x2, y2, d > 1 ? 2 : 1, col);
+  if (d > 0) { branch(x, x2, y2, a - rand(.3, .6), len * .75, d - 1, col); branch(x, x2, y2, a + rand(.3, .6), len * .75, d - 1, col); }
+  else { x.fillStyle = '#ffffff'; x.globalAlpha = .5; x.fillRect(R(x2), R(y2), 1, 1); x.globalAlpha = 1; }
+}
+const BG = [];
+function getBg(zi) {
+  if (BG[zi]) return BG[zi];
+  const z = ZONES[zi], c = mk(W, H), x = c.getContext('2d');
+  bands(x, 0, SURF, z.sky); bands(x, SURF, SEABED + 6, z.water);
+  if (zi === 0) { x.drawImage(I.rock, 14, 286); x.drawImage(I.rock, 132, 288); }
+  if (zi === 1) {
+    [[18, '#ff7aa2'], [46, '#ff9f43'], [120, '#b57aff'], [150, '#ff7aa2'], [96, '#ffcf5a']].forEach(([cx, col]) => branch(x, cx, SEABED + 2, -Math.PI / 2 + rand(-.2, .2), rand(8, 12), 3, col));
+    const brain = paint(18, 11, G => G.ell(9, 7, 8, 5, (px, py) => (px + py) % 3 === 0 ? '#e0833a' : '#ff9f43'));
+    x.drawImage(brain, 64, 290); x.drawImage(brain, 160, 291);
+  }
+  if (zi === 2) {
+    const spike = paint(10, 16, G => { G.tri(1, 15, 9, 15, 5, 1, '#e8f6ff'); G.tri(5, 15, 9, 15, 5, 1, '#bfe0f2'); });
+    [[12, 288], [22, 292], [140, 286], [152, 291], [80, 293]].forEach(([a, b]) => x.drawImage(spike, a, b - 4));
+  }
+  if (zi === 3) { x.drawImage(I.ship, 96, SEABED - 36); x.drawImage(I.barrel, 20, SEABED - 6); x.drawImage(I.barrel, 60, SEABED - 4); }
+  if (zi === 4) { z.vents.forEach(([vx, vy]) => x.drawImage(I.vent, vx - 13, vy - 4)); }
+  if (zi === 5) {
+    x.drawImage(I.rockD, -8, 280); x.drawImage(I.rockD, 128, 282);
+    for (let i = 0; i < 14; i++) { x.fillStyle = pick(['#5ff2d0', '#b58cff', '#ffe27a']); x.globalAlpha = rand(.4, .9); x.fillRect(R(rand(0, W)), R(rand(SURF + 20, SEABED)), 1, 1); }
+    x.globalAlpha = 1;
+  }
+  for (let i = 0; i < W; i++) {
+    const top = R(SEABED + Math.sin(i * .09) * 2 + Math.sin(i * .23 + 1));
+    x.fillStyle = z.sand2; x.fillRect(i, top, 1, 1); x.fillStyle = z.sand; x.fillRect(i, top + 1, 1, H - top - 1);
+  }
+  x.fillStyle = z.sand2;
+  for (let i = 0; i < 60; i++) x.fillRect(Math.floor(rand(0, W)), Math.floor(rand(SEABED + 4, H)), 1, 1);
+  return (BG[zi] = c);
+}
+let WEEDS = [], STARS = [], CLOUDS = [];
+function buildScenery(zi) {
+  const z = ZONES[zi], n = zi === 1 ? 6 : 7;
+  WEEDS = Array.from({ length: n }, (_, i) => ({ x: R(8 + i * (164 / n) + rand(-6, 6)), h: R(zi === 1 ? rand(28, 60) : rand(14, 40)), ph: rand(0, 6), col: pick(z.weed) }));
+  STARS = Array.from({ length: z.stars || 0 }, () => ({ x: R(rand(0, W)), y: R(rand(24, SURF - 6)), ph: rand(0, 6) }));
+  CLOUDS = z.clouds ? [{ x: 10, y: 30, v: 3 }, { x: 110, y: 50, v: 2 }, { x: 170, y: 22, v: 4 }] : [];
+}
+
+// ============================================================ saves (per-browser)
+function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+let DEX = load('sea-monster-dex', { fish: {}, boss: {}, zone: 0 });
+DEX.fish = DEX.fish || {}; DEX.boss = DEX.boss || {}; DEX.zone = DEX.zone || 0;
+let best = load('sea-monster-best', 0);
+let muted = load('sea-monster-mute', false);
+const dexCount = () => Object.keys(DEX.fish).length + Object.keys(DEX.boss).length;
+const DEX_TOTAL = FISH_ORDER.length + BOSS_ORDER.length;
+
+// ============================================================ audio + haptics
+let AC = null, NB = null;
+function initAudio() {
+  try { if (!AC) { const A = window.AudioContext || window.webkitAudioContext; if (A) AC = new A(); } if (AC && AC.state === 'suspended') AC.resume(); } catch (e) {}
+}
+function tone(f, d, type, v, f2, delay) {
+  if (!AC || muted) return;
+  try {
+    const t = AC.currentTime + (delay || 0), o = AC.createOscillator(), gn = AC.createGain();
+    o.type = type || 'square'; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
+    gn.gain.setValueAtTime(v || .06, t); gn.gain.exponentialRampToValueAtTime(.0001, t + d);
+    o.connect(gn); gn.connect(AC.destination); o.start(t); o.stop(t + d + .03);
+  } catch (e) {}
+}
+function noise(d, v, freq, delay, ft) {
+  if (!AC || muted) return;
+  try {
+    if (!NB) { NB = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate); const a = NB.getChannelData(0); for (let i = 0; i < a.length; i++) a[i] = Math.random() * 2 - 1; }
+    const t = AC.currentTime + (delay || 0), s = AC.createBufferSource(), fl = AC.createBiquadFilter(), gn = AC.createGain();
+    s.buffer = NB; fl.type = ft || 'lowpass'; fl.frequency.value = freq || 1000;
+    gn.gain.setValueAtTime(v || .1, t); gn.gain.exponentialRampToValueAtTime(.0001, t + d);
+    s.connect(fl); fl.connect(gn); gn.connect(AC.destination); s.start(t); s.stop(t + d + .03);
+  } catch (e) {}
+}
+const SFX = {
+  cast() { noise(.25, .06, 2500, 0, 'bandpass'); tone(700, .22, 'sine', .05, 250); },
+  splash() { noise(.4, .14, 900); },
+  bigSplash() { noise(.8, .22, 700); tone(120, .5, 'sine', .1, 50); },
+  nibble() { tone(1000, .04, 'square', .03); },
+  bite() { tone(880, .08, 'square', .07); tone(1320, .14, 'square', .07, 0, .08); },
+  hook() { tone(200, .15, 'sawtooth', .07, 420); },
+  tick() { tone(1800, .015, 'square', .012); },
+  warn() { tone(620, .06, 'square', .04); },
+  tele() { tone(300, .12, 'triangle', .05, 520); },
+  dash() { noise(.18, .07, 700); },
+  snap() { noise(.18, .18, 3500, 0, 'highpass'); tone(320, .35, 'sawtooth', .07, 50); },
+  fail() { tone(420, .18, 'triangle', .05, 220); },
+  caught() { [523, 659, 784, 1047].forEach((f, i) => tone(f, .14, 'square', .06, 0, i * .07)); },
+  buff() { [1047, 1319, 1568, 2093].forEach((f, i) => tone(f, .12, 'triangle', .05, 0, .32 + i * .05)); },
+  shiny() { [1568, 2093, 2637, 3136, 2637, 3136].forEach((f, i) => tone(f, .1, 'triangle', .05, 0, .5 + i * .06)); },
+  coin() { tone(1500, .05, 'square', .025); tone(2200, .07, 'square', .025, 0, .04); },
+  zap() { noise(.16, .1, 4000, 0, 'highpass'); tone(1400, .16, 'sawtooth', .04, 200); },
+  crit() { tone(160, .16, 'square', .09, 80); noise(.12, .1, 1600); },
+  shield() { tone(600, .25, 'sine', .08, 1200); tone(900, .2, 'triangle', .04, 1800, .05); },
+  puff() { tone(200, .2, 'triangle', .07, 520); },
+  ink() { noise(.5, .12, 400); },
+  ghost() { tone(500, .6, 'sine', .05, 250); tone(760, .6, 'sine', .03, 380); },
+  rumble() { tone(55, 1.6, 'sawtooth', .1, 35); noise(1.4, .08, 250); },
+  click() { tone(900, .04, 'square', .03); },
+  win() { [523, 659, 784, 1047, 784, 1047, 1319].forEach((f, i) => tone(f, .18, 'square', .06, 0, i * .11)); },
+  lose() { [392, 330, 262, 196].forEach((f, i) => tone(f, .25, 'triangle', .07, 0, i * .18)); },
+};
+function vib(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+
+// ============================================================ game state
+let run = null, state = 'title', st = 0, T = 0, hold = false;
+let bob = null, hook = null, cast = null, biter = null, F = null, B = null, tension = 0, leap = null, show = null;
+let pauseNext = null, pauseDur = 0, dexPage = 0, dexBack = 'title';
+let P = [], POPS = [], INK = [], decor = [], TQ = [];
+let shake = 0, flash = 0, slowT = 0, zapBolt = null, warnT = 0, tickT = 0, coinsShown = 0, bubbleT = 0, coinSfxT = 0;
+let catMood = null, catMoodT = 0, blinkT = 2, jerk = false;
+
+const curZone = () => run ? run.zone : 0;
+const Z = () => ZONES[curZone()];
+function go(s) { state = s; st = 0; }
+function pause(d, fn) { go('pause'); pauseDur = d; pauseNext = fn; }
+function mood(m, t) { catMood = m; catMoodT = t; }
+
+function newRun() {
+  run = { hp: 3, coins: 0, zone: 0, zoneCaught: 0, fishTotal: 0, fights: 0, bossDone: false,
+          reel: 1, bite: 1, gold: 1, line: 1, zap: 0, crit: 0, calm: 1, slow: 1, shield: 0, fever: 0, lucky: 0, lineP: 0, calmP: 0, slowP: 0,
+          stacks: {}, order: [], newBuff: null, newT: 0, newBest: false };
+  coinsShown = 0; B = null; F = null; INK = [];
+  setupZone(0);
+}
+function setupZone(zi) {
+  if (run) {
+    run.zone = zi; run.zoneCaught = 0; run.bossDone = false;
+    if (zi > DEX.zone) { DEX.zone = zi; save('sea-monster-dex', DEX); }
+    // checkpoint: what the run looked like on entering this zone, restored by "continue"
+    const { cp, ...snap } = run; run.cp = JSON.parse(JSON.stringify(snap));
+  }
+  buildScenery(zi); getBg(zi);
+  decor = Array.from({ length: 4 }, () => newDecor(true));
+}
+function weightedFish() {
+  const list = Z().fish, tot = list.reduce((s, k) => s + (SP[k].wt || 1), 0);
+  let r = Math.random() * tot;
+  for (const k of list) { r -= SP[k].wt || 1; if (r <= 0) return k; }
+  return list[0];
+}
+function newDecor(anyX) {
+  const dir = Math.random() < .5 ? 1 : -1;
+  return { key: pick(Z().fish), x: anyX ? rand(10, W - 10) : (dir > 0 ? -24 : W + 24), y: rand(SURF + 22, SEABED - 16), vx: dir * rand(12, 26), flee: false };
+}
+function zapInterval() { return 5 / (1 + .3 * Math.max(0, run.zap - 1)); }
+function applyBuff(k, l) {
+  switch (k) {
+    case 'reel': run.reel += .15 * l; break;
+    case 'bite': run.bite *= l > 1 ? .6 : .72; break;
+    case 'gold': run.gold += .5 * l; break;
+    case 'line': run.lineP += l; run.line = 1 / (1 + .15 * run.lineP); break;
+    case 'zap': run.zap += l; break;
+    case 'crit': run.crit = Math.min(.8, run.crit + .12 * l); break;
+    case 'calm': run.calmP += l; run.calm = 1 / (1 + .12 * run.calmP); break;
+    case 'slow': run.slowP += l; run.slow = 1 / (1 + .12 * run.slowP); break;
+    case 'shield': run.shield += l; break;
+    case 'fever': run.fever = Math.min(2, run.fever + .5 * l); break;
+    case 'lucky': run.lucky = Math.min(.5, run.lucky + .08 * l); break;
+    case 'heal': run.hp = Math.min(6, run.hp + 1); return;
+  }
+  if (!run.stacks[k]) { run.stacks[k] = 0; if (!run.order.includes(k)) run.order.push(k); }
+  run.stacks[k] = k === 'shield' ? run.shield : run.stacks[k] + l;
+  run.newBuff = k; run.newT = 1.4;
+}
+function saveBest() { if (run.coins > best) { best = run.coins; run.newBest = true; save('sea-monster-best', best); } }
+
+// ---------- positions
+const bobY = () => R(Math.sin(T * 1.6));
+function handPos() { return { x: BX + 29, y: SURF - 11 + bobY() }; }
+function tipPos() { const h = handPos(), b = (state === 'fight' || state === 'boss') ? tension / 100 : 0; return { x: h.x + 22 + b * 8, y: h.y - 26 + b * 16 }; }
+
+// ---------- fx helpers
+function part(o) { P.push(Object.assign({ vx: 0, vy: 0, g: 0, life: 1, col: '#ffffff', s: 1, type: 'dot', age: 0 }, o, { max: o.life || 1 })); }
+function splash(x, n, pw) { for (let i = 0; i < n; i++) part({ x, y: SURF - 1, vx: rand(-35, 35) * pw, vy: rand(-90, -30) * pw, g: 240, life: rand(.4, .8), col: pick(['#ffffff', '#dff6ff', Z().hl]), s: Math.random() < .3 ? 2 : 1 }); }
+function sparks(x, y, col, n, sp) { for (let i = 0; i < n; i++) { const a = rand(0, Math.PI * 2), v = rand(.3, 1) * sp; part({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: rand(.25, .55), col, s: Math.random() < .3 ? 2 : 1 }); } }
+function pop(s, x, y, col, size, life) { POPS.push({ s, x, y, col: col || '#ffffff', size: size || 9, life: life || 1, max: life || 1 }); }
+function coinBurst(x, y, n) { for (let i = 0; i < n; i++) part({ type: 'coin', x: x + rand(-6, 6), y: y + rand(-4, 4), vx: rand(-60, 60), vy: rand(-80, -20), g: 160, life: 3 }); }
+function critFx(A) { pop('暴击!', A.px, A.py - 12, '#ff6a5a', 10, .8); sparks(A.px, A.py, '#ff5a4a', 10, 60); shake = Math.max(shake, 3); SFX.crit(); vib(25); }
+function zapFx(A) {
+  const t = tipPos(), pts = [[t.x, t.y]];
+  for (let i = 1; i < 7; i++) pts.push([lerp(t.x, A.px, i / 7) + rand(-5, 5), lerp(t.y, A.py, i / 7) + rand(-3, 3)]);
+  pts.push([A.px, A.py]);
+  zapBolt = { t: .28, pts };
+  sparks(A.px, A.py, '#fff27a', 12, 50); flash = Math.max(flash, .25); pop('麻痹!', A.px, A.py - 12, '#fff27a', 9, .7);
+  SFX.zap(); vib(20);
+}
+function loseHeartFx() { const x = 2 + run.hp * 9 + 4; for (let i = 0; i < 8; i++) part({ x, y: 7, vx: rand(-40, 40), vy: rand(-60, -10), g: 200, life: .7, col: '#ff4d6d', s: 2 }); }
+function useShield(A) {
+  run.shield--; run.stacks.shield = run.shield;
+  tension = 0; A.grace = 1.2;
+  pop('护盾!', A.px, A.py - 14, '#8fd8ff', 12, 1); sparks(A.px, A.py, '#bfe8ff', 16, 70);
+  SFX.shield(); vib(30); flash = Math.max(flash, .3);
+}
+
+// ============================================================ input
+const wrap = document.getElementById('wrap'), cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const low = mk(W, H), g = low.getContext('2d');
+let K = 1;
+function fit() {
+  const r = wrap.getBoundingClientRect(), cs = getComputedStyle(wrap);
+  const aw = r.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const ah = r.height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  const sc = Math.max(.5, Math.min(aw / W, ah / H));
+  const cw = Math.floor(W * sc), ch = Math.floor(H * sc);
+  cv.style.width = cw + 'px'; cv.style.height = ch + 'px';
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  cv.width = R(cw * dpr); cv.height = R(ch * dpr); K = cv.width / W;
+}
+window.addEventListener('resize', fit); fit();
+function toLogical(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
+const inR = (p, r) => p.x >= r[0] && p.x <= r[0] + r[2] && p.y >= r[1] && p.y <= r[1] + r[3];
+const BTN = {
+  titleDex: [58, 250, 64, 17],
+  cont: [26, 196, 128, 18], again: [26, 218, 62, 17], overDex: [92, 218, 62, 17],
+  dexClose: [146, 30, 22, 14], dexPrev: [12, 272, 28, 15], dexNext: [140, 272, 28, 15],
+};
+window.addEventListener('pointerdown', e => {
+  e.preventDefault(); initAudio();
+  const p = toLogical(e);
+  if (p.x >= 162 && p.y <= 18 && p.y >= -10) { muted = !muted; save('sea-monster-mute', muted); return; }
+  hold = true; if (state === 'fight' || state === 'boss') jerk = true; onPress(p);
+}, { passive: false });
+['pointerup', 'pointercancel', 'blur'].forEach(ev => window.addEventListener(ev, () => { hold = false; }));
+window.addEventListener('contextmenu', e => e.preventDefault());
+
+function openDex(from) { dexBack = from; dexPage = Math.min(DEX.zone, run ? run.zone : 0); go('dex'); SFX.click(); }
+function onPress(p) {
+  if (state === 'title') { if (inR(p, BTN.titleDex)) openDex('title'); else { newRun(); go('idle'); } return; }
+  if (state === 'dex') {
+    if (inR(p, BTN.dexClose)) { go(dexBack); st = 2; SFX.click(); }
+    else if (inR(p, BTN.dexPrev)) { dexPage = (dexPage + ZONES.length - 1) % ZONES.length; SFX.click(); }
+    else if (inR(p, BTN.dexNext)) { dexPage = (dexPage + 1) % ZONES.length; SFX.click(); }
+    return;
+  }
+  if (state === 'idle') { startCast(); return; }
+  if (state === 'wait') { if (biter && biter.ph === 'bite') startFight(); else if (bob) bob.dip = 2; return; }
+  if (state === 'show' && st > .3) { endShow(); return; }
+  if ((state === 'over' || state === 'win') && st > .5) {
+    if (state === 'over' && inR(p, BTN.cont)) continueRun();
+    else if (inR(p, BTN.again)) { newRun(); go('idle'); }
+    else if (inR(p, BTN.overDex)) openDex(state);
+  }
+}
+
+// ============================================================ fishing flow
+function startCast() {
+  const t = tipPos();
+  cast = { t: 0, dur: .3, x0: t.x, y0: t.y, tx: rand(84, 150), bx: t.x, by: t.y, wait: 0 };
+  go('cast'); SFX.cast();
+}
+function updCast(dt) {
+  cast.t += dt; const u = Math.min(1, cast.t / cast.dur);
+  cast.bx = lerp(cast.x0, cast.tx, u); cast.by = lerp(cast.y0, SURF - 3, u) - Math.sin(Math.PI * u) * 30;
+  if (u >= 1) {
+    splash(cast.tx, 8, .7); SFX.splash();
+    const z = Z();
+    bob = { x: cast.tx, dip: 3 }; hook = { x: cast.tx, y: SURF + 3, ty: rand(z.depth[0], z.depth[1]) };
+    cast.wait = rand(.25, .7) * run.bite; biter = null; go('wait');
+  }
+}
+function spawnBiter() {
+  const fromLeft = Math.random() < .5;
+  biter = { key: weightedFish(), x: hook.x + (fromLeft ? -1 : 1) * rand(35, 55), y: clamp(hook.y + rand(-24, 24), SURF + 20, SEABED - 10),
+            face: fromLeft ? 1 : -1, ph: 'approach', t: 0, n: 1, c: 0, shiny: Math.random() < .03 + run.lucky };
+}
+function updWait(dt) {
+  hook.y = Math.min(hook.ty, hook.y + 180 * dt);
+  bob.dip = Math.max(0, bob.dip - dt * 18);
+  if (!biter) { if (hook.y >= hook.ty) { cast.wait -= dt; if (cast.wait <= 0) spawnBiter(); } return; }
+  const b = biter;
+  if (b.shiny && Math.random() < dt * 8) part({ x: b.x + rand(-8, 8), y: b.y + rand(-5, 5), vy: -8, life: .5, col: pick(['#ffe14a', '#ffffff']) });
+  if (b.ph === 'approach') {
+    const dx = hook.x - b.x, dy = hook.y - b.y, d = Math.hypot(dx, dy);
+    if (d < 2) { b.ph = 'nibble'; b.n = Math.random() < .5 ? 1 : 2; b.t = 0; b.c = 0; }
+    else { b.x += dx / d * 90 * dt; b.y += dy / d * 90 * dt; if (Math.abs(dx) > 2) b.face = dx > 0 ? 1 : -1; }
+  } else if (b.ph === 'nibble') {
+    b.t += dt; const cyc = .4, k = b.t % cyc;
+    const off = k < .2 ? k / .2 * 7 : (1 - (k - .2) / .2) * 7;
+    b.x = hook.x - b.face * off; b.y = hook.y;
+    const c = Math.floor(b.t / cyc);
+    if (c > b.c) {
+      b.c = c;
+      if (c >= b.n) { b.ph = 'bite'; b.t = 0; b.x = hook.x; bob.dip = 6; SFX.bite(); vib(50); splash(bob.x, 5, .5); }
+      else { bob.dip = 2.5; SFX.nibble(); }
+    }
+  } else if (b.ph === 'bite') {
+    b.t += dt; b.x = hook.x; bob.dip = 5 + Math.sin(T * 30);
+    if (b.t > (run.fights < 3 ? 1.6 : 1.1)) { b.ph = 'leave'; b.face = -b.face; SFX.fail(); pop('跑了', bob.x, SURF - 14, '#dff6ff', 8, .8); }
+  } else if (b.ph === 'leave') {
+    b.x += b.face * 140 * dt;
+    if (b.x < -30 || b.x > W + 30) { biter = null; cast.wait = rand(.15, .4) * run.bite; }
+  }
+}
+function startFight() {
+  const sp = SP[biter.key], z = Z();
+  F = { key: biter.key, shiny: biter.shiny, x: biter.x, y: biter.y, px: biter.x, py: biter.y, face: biter.face, state: 'calm',
+        timer: run.fishTotal === 0 ? 1.8 : rand(.6, 1.2), stun: 0, grace: 0, frenzy: run.fever,
+        pow: sp.pow * z.pow * run.calm, spd: sp.spd * (.9 + z.pow * .2) * (.5 + .5 * run.slow), freq: sp.freq * (.85 + .15 * z.pow), dir: 1, critT: .45, zapT: zapInterval(),
+        weight: 1 + .12 * run.zone, tele: .45 - .02 * run.zone };
+  biter = null; tension = 25; run.fights++;
+  splash(bob.x, 8, .8); bob = null; hook = null;
+  go('fight'); SFX.hook(); vib(30); shake = 2;
+}
+function actorTimers(A, dt, tele, dashDur, calmDur) {
+  if (A.stun > 0) { A.stun -= dt; if (A.state !== 'calm') { A.state = 'calm'; A.timer = calmDur(); A.erupt = false; } return; }
+  A.timer -= dt; if (A.timer > 0) return;
+  if (A.state === 'calm') { A.state = 'tele'; A.timer = tele; SFX.tele(); if (A.onTele) A.onTele(); }
+  else if (A.state === 'tele') { A.state = 'dash'; A.timer = dashDur() * run.slow * (A.erupt ? 1.5 : 1); A.dir = Math.random() < .5 ? -1 : 1; SFX.dash(); shake = Math.max(shake, A.erupt ? 5 : 1.5); }
+  else {
+    A.erupt = false;
+    if (A.double && !A.combo) { A.combo = 1; A.state = 'calm'; A.timer = .4; return; }
+    A.combo = 0; A.state = 'calm'; A.timer = calmDur();
+  }
+}
+const isDashing = A => A.state === 'dash' && A.stun <= 0 && !(A.frenzy > 0);
+function tensionStep(A, dt, reel) {
+  const dashing = isDashing(A);
+  let prog = 0;
+  if (A.grace > 0) A.grace -= dt;
+  // every fresh press yanks the line a little, so frantic tapping is risky
+  if (jerk) { jerk = false; if (!(A.frenzy > 0) && !(A.stun > 0)) tension += JERK; }
+  if (hold) {
+    if (A.frenzy > 0) { tension = Math.max(0, tension - 60 * dt); prog = reel * 2 * dt; }
+    else if (A.stun > 0) { tension = Math.max(0, tension - 60 * dt); prog = reel * 1.8 * dt; }
+    else if (dashing) { if (!(A.grace > 0)) tension += DASH_RATE * A.pow * (A.erupt ? 1.5 : 1) * run.line * dt; prog = -3 * dt; }
+    else {
+      tension += (38 - tension) * 1.6 * dt; prog = reel * dt;
+      A.critT -= dt; if (A.critT <= 0) { A.critT = .45; if (Math.random() < run.crit) { prog += 16; critFx(A); } }
+    }
+    tickT -= dt; if (tickT <= 0) { tickT = .09; SFX.tick(); }
+  } else {
+    tension = Math.max(0, tension - 45 * dt);
+    prog = dashing ? -A.spd * dt : -8 * dt;
+  }
+  if (hold && tension > 65) { warnT -= dt; if (warnT <= 0) { warnT = .18; SFX.warn(); vib(15); } }
+  if (run.zap > 0) { A.zapT -= dt; if (A.zapT <= 0) { A.zapT = zapInterval(); A.stun = 1 + .12 * run.zap; zapFx(A); } }
+  return prog;
+}
+function updFight(dt) {
+  const f = F;
+  if (f.frenzy > 0) { f.frenzy -= dt; f.state = 'calm'; f.timer = Math.max(f.timer, .6); }
+  else actorTimers(f, dt, f.tele, () => rand(.9, 1.4), () => rand(.7, 1.7) / f.freq);
+  const prog = tensionStep(f, dt, REEL * run.reel / f.weight);
+  f.y -= prog;
+  if (isDashing(f)) {
+    f.x += f.dir * f.spd * dt; f.face = f.dir;
+    if (f.x < 14 || f.x > 166) { f.dir *= -1; f.x = clamp(f.x, 14, 166); }
+    if (Math.random() < dt * 20) part({ type: 'bubble', x: f.x, y: f.y, vy: -rand(15, 30), life: 3, col: 'rgba(255,255,255,.7)' });
+  } else {
+    const tx = tipPos().x + 34; f.x += (tx - f.x) * (hold ? .7 : .25) * dt; f.face = -1;
+  }
+  f.px = f.x; f.py = f.y;
+  if (f.shiny && Math.random() < dt * 8) part({ x: f.x + rand(-8, 8), y: f.y + rand(-5, 5), vy: -8, life: .5, col: pick(['#ffe14a', '#ffffff']) });
+  if (tension >= 100) { if (run.shield > 0) useShield(f); else return breakLine(); }
+  if (f.y >= SEABED - 3) return escapeFish();
+  if (f.y <= SURF + 2) return catchFish();
+}
+function breakLine() {
+  run.hp--; SFX.snap(); vib([80, 40, 80]); shake = 6; loseHeartFx(); mood('sad', 1.6);
+  pop('断线!', F.x, F.y - 12, '#ff5a4a', 12, 1);
+  sparks(F.x, F.y, '#ffffff', 8, 40);
+  decor.push({ key: F.key, x: F.x, y: F.y, vx: (F.x < 90 ? -1 : 1) * 30, flee: true });
+  F = null; tension = 0;
+  if (run.hp <= 0) pause(.8, gameOver); else pause(.5, () => go('idle'));
+}
+function escapeFish() {
+  pop('跑掉了', F.x, F.y - 12, '#dff6ff', 9, 1); SFX.fail(); mood('sad', 1.2);
+  decor.push({ key: F.key, x: F.x, y: F.y, vx: (F.x < 90 ? -1 : 1) * 30, flee: true });
+  F = null; tension = 0; pause(.45, () => go('idle'));
+}
+function cardScale(w, h) { return Math.max(1, Math.min(3, Math.floor(120 / w), Math.floor(48 / h))); }
+function catchFish() {
+  SFX.bigSplash(); splash(F.x, 18, 1.2); vib(30); shake = 3; mood('happy', 3.5);
+  const S = SPR[F.key];
+  leap = { key: F.key, shiny: F.shiny, img: F.shiny ? S.gl : S.l, w: S.w, h: S.h, x0: F.x, y0: SURF, x1: 90, y1: 136, t: 0, dur: .6, sc: cardScale(S.w, S.h), boss: false };
+  run.fishTotal++; run.zoneCaught++; F = null; tension = 0; go('leap');
+}
+function updLeap(rdt) {
+  leap.t += rdt;
+  if (Math.random() < .5) { const p = leapPos(); part({ x: p.x + rand(-4, 4), y: p.y + rand(-4, 4), vy: 10, life: .5, col: pick(['#fff27a', '#ffffff']) }); }
+  if (leap.t >= leap.dur) startShow();
+}
+function leapPos() {
+  const u = Math.min(1, leap.t / leap.dur), s = u + .12 * Math.sin(2 * Math.PI * u);
+  return { x: lerp(leap.x0, leap.x1, s), y: lerp(leap.y0, leap.y1, s) - Math.sin(Math.PI * s) * (leap.boss ? 50 : 70), sc: lerp(1, leap.sc, s) };
+}
+function startShow() {
+  if (leap.boss) {
+    const d = BOSSES[leap.key], val = R(d.val * run.gold), first = !DEX.boss[leap.key];
+    run.coins += val; run.hp = Math.min(6, run.hp + 1);
+    DEX.boss[leap.key] = { n: ((DEX.boss[leap.key] || {}).n || 0) + 1 }; save('sea-monster-dex', DEX);
+    show = { boss: true, key: leap.key, name: d.name, val, img: leap.img, w: leap.w, h: leap.h, sc: leap.sc, first };
+    coinBurst(90, 190, 16); SFX.win(); vib([40, 30, 40, 30, 80]);
+  } else {
+    const sp = SP[leap.key], shiny = leap.shiny;
+    const val = R(sp.val * run.gold * (shiny ? 5 : 1));
+    const cm = R(sp.cm * (.6 + Math.pow(Math.random(), 2) * .9) * (shiny ? 1.3 : 1));
+    const prev = DEX.fish[leap.key], first = !prev, record = !!prev && cm > prev.max;
+    DEX.fish[leap.key] = { n: (prev ? prev.n : 0) + 1, max: Math.max(prev ? prev.max : 0, cm), shiny: (prev && prev.shiny) || shiny };
+    save('sea-monster-dex', DEX);
+    run.coins += val; applyBuff(sp.buff, sp.lvl); if (shiny) applyBuff(sp.buff, sp.lvl);
+    show = { boss: false, key: leap.key, name: sp.name, label: sp.label, buff: sp.buff, val, cm, first, record, shiny, img: leap.img, w: leap.w, h: leap.h, sc: leap.sc };
+    coinBurst(90, 190, Math.min(16, 3 + (val >> 2))); SFX.caught(); SFX.buff(); if (shiny) { SFX.shiny(); flash = .5; }
+  }
+  leap = null; go('show');
+}
+function endShow() {
+  const wasBoss = show.boss; show = null;
+  if (wasBoss) { if (run.zone < ZONES.length - 1) go('trans'); else winGame(); return; }
+  if (run.zoneCaught >= NEED && !run.bossDone) startBoss(); else go('idle');
+}
+
+// ---------- boss
+function startBoss() {
+  const key = Z().boss, d = BOSSES[key];
+  B = { key, d, x: 90, y: 380, sx: 0, p: 0, state: 'calm', timer: 1.4, stun: 0, grace: 0, frenzy: 0, phase: 0,
+        pow: d.pow * run.calm * (1 + .1 * run.zone), spd: d.spd * (.5 + .5 * run.slow), freq: 1, len: d.len, infl: 0, inkT: 3.5, arm: .15, side: 1, dir: 1, critT: .45, zapT: zapInterval(),
+        px: 90, py: 380, double: key === 'crab', combo: 0, invT: rand(4, 5.5), invis: false, alpha: .85, eruptT: rand(4, 6), erupt: false };
+  if (key === 'kraken') B.onTele = () => { B.side = Math.random() < .5 ? -1 : 1; };
+  decor.forEach(f => { f.flee = true; f.vx = (f.x < 90 ? -1 : 1) * 40; });
+  bob = null; hook = null; tension = 0;
+  go('warn'); SFX.rumble(); vib([100, 50, 100]);
+}
+function updWarn() {
+  const u = Math.min(1, st / 1), e = 1 - (1 - u) * (1 - u);
+  B.y = lerp(380, B.d.y0, e); shake = Math.max(shake, 1.2);
+  bossAttach();
+  if (st > 1.3) { tension = 15; B.frenzy = run.fever; go('boss'); SFX.hook(); vib(40); pop('咬钩了!', 90, 120, '#ffe14a', 12, 1); }
+}
+function bossAttach() {
+  const b = B;
+  if (b.key === 'puffer') {
+    const big = b.infl > .5, S = big ? SPRB.pufferBig : SPRB.puffer, m = big ? [S.w - 1 - 49, 31] : [S.w - 1 - 37, 19];
+    b.px = R(b.x - S.w / 2) + m[0]; b.py = R(b.y - S.h / 2) + m[1];
+  } else if (b.key === 'squid') { b.px = b.x; b.py = b.y + 3; }
+  else if (b.key === 'crab') { b.px = b.x; b.py = b.y + 31; }
+  else if (b.key === 'ghost') { b.px = R(b.x - 33) + 6; b.py = R(b.y - 14) + 17; }
+  else if (b.key === 'serpent') { b.px = R(b.x - 17) + 1; b.py = R(b.y - 12) + 18; }
+  else { b.px = b.x; b.py = b.y + 50; }
+}
+function spawnInk() {
+  SFX.ink(); vib(40);
+  for (let i = 0; i < 9; i++) INK.push({ x: B.x + rand(-60, 60), y: B.y + rand(-70, 30), r: rand(14, 26), life: 3, max: 3 });
+  pop('喷墨!', B.x, B.y - 10, '#c9b8ff', 10, .8);
+}
+function updBoss(dt) {
+  const b = B, d = b.d;
+  if (b.frenzy > 0) { b.frenzy -= dt; b.state = 'calm'; b.timer = Math.max(b.timer, .8); }
+  else actorTimers(b, dt, b.erupt ? .9 : d.tele, d.dash, () => d.calm() / b.freq);
+  if (b.key === 'puffer') {
+    const tg = b.state === 'dash' ? 1 : b.state === 'tele' ? .65 : 0, was = b.infl > .5;
+    b.infl += (tg - b.infl) * Math.min(1, 8 * dt);
+    if (!was && b.infl > .5) { SFX.puff(); sparks(b.x, b.y, '#fff1c4', 14, 70); shake = Math.max(shake, 2); }
+  }
+  if (b.key === 'squid') { b.inkT -= dt; if (b.inkT <= 0 && b.state === 'calm' && b.stun <= 0 && b.frenzy <= 0) { spawnInk(); b.inkT = rand(6.5, 8.5); b.timer = Math.min(b.timer, .9); } }
+  if (b.key === 'ghost') {
+    b.invT -= dt;
+    if (b.invT <= 0) { b.invis = !b.invis; b.invT = b.invis ? 3.2 : rand(4.5, 6.5); if (b.invis) { SFX.ghost(); pop('隐身!', b.x, b.y - 20, '#cfeee8', 11, 1); } }
+    b.alpha += ((b.invis ? .1 : .85) - b.alpha) * Math.min(1, 4 * dt);
+  }
+  if (b.key === 'serpent') {
+    b.eruptT -= dt;
+    if (b.eruptT <= 0 && b.state === 'calm' && b.stun <= 0 && !(b.frenzy > 0)) {
+      b.eruptT = rand(7, 9); b.erupt = true; b.state = 'tele'; b.timer = .9;
+      SFX.rumble(); vib([60, 40, 60]); pop('喷发!', 90, 150, '#ff9a5a', 13, 1.1);
+      Z().vents.forEach(([vx, vy]) => { for (let i = 0; i < 20; i++) part({ x: vx + rand(-3, 3), y: vy - 4, vx: rand(-30, 30), vy: rand(-110, -50), g: 90, life: rand(.8, 1.4), col: pick(['#ff7a2a', '#ffe14a', '#ff4a2a']), s: 2 }); });
+    }
+  }
+  if (b.key === 'kraken') { const tg = b.state === 'tele' ? 1 : b.state === 'dash' ? .7 : .15; b.arm += (tg - b.arm) * Math.min(1, 5 * dt); }
+  const prog = tensionStep(b, dt, REEL * run.reel);
+  b.p = clamp(b.p + prog / b.len, 0, 1);
+  const dashing = isDashing(b), swing = b.key === 'crab' ? 44 : 28;
+  b.sx += ((dashing ? b.dir * swing : 0) - b.sx) * Math.min(1, (b.key === 'crab' ? 5 : 2.5) * dt);
+  b.x = 90 + Math.sin(T * .7) * 12 + b.sx;
+  b.y = lerp(d.y0, d.y1, b.p);
+  if (dashing && Math.random() < dt * 25) part({ type: 'bubble', x: b.x + rand(-20, 20), y: b.y + rand(0, 30), vy: -rand(15, 30), life: 3, col: 'rgba(255,255,255,.7)' });
+  bossAttach();
+  if (b.key === 'kraken') {
+    const ph = b.p >= 2 / 3 ? 2 : b.p >= 1 / 3 ? 1 : 0;
+    if (ph > b.phase) {
+      b.phase = ph; b.frenzy = 2.4; b.pow = d.pow * run.calm * (1 + .1 * run.zone) * (1 + .12 * ph); b.freq = 1 + .25 * ph; tension = 0;
+      slowT = .45; flash = .7; shake = 6; SFX.crit(); SFX.buff(); vib([60, 30, 60]);
+      pop('破防!', 90, 130, '#ffe14a', 16, 1.4);
+    }
+  }
+  if (tension >= 100) { if (run.shield > 0) useShield(b); else return bossBreak(); }
+  if (b.p >= 1) return bossCatch();
+}
+function bossBreak() {
+  run.hp--; SFX.snap(); vib([80, 40, 80]); shake = 6; loseHeartFx(); mood('sad', 1.6);
+  pop('断线!', B.px, B.py - 14, '#ff5a4a', 12, 1);
+  tension = 0; B.grace = 1.3; B.p = Math.max(0, B.p - .06);
+  if (run.hp <= 0) { pause(.9, gameOver); return; }
+  pop('再拉!', 90, 150, '#ffffff', 10, 1);
+}
+function bossCatch() {
+  SFX.bigSplash(); SFX.caught(); splash(B.x, 30, 1.6); shake = 7; flash = .6; vib([60, 40, 120]); mood('happy', 4.5);
+  const img = B.d.card(), w = img.width, h = img.height;
+  leap = { key: B.key, img, w, h, x0: B.x, y0: Math.min(B.y, SURF + 40), x1: 90, y1: 140, t: 0, dur: .8, sc: Math.max(1, Math.min(2, Math.floor(140 / w), Math.floor(84 / h))), boss: true };
+  run.bossDone = true; B = null; INK = []; tension = 0; go('leap');
+}
+function updTrans() {
+  if (st >= .4 && !run.transDone) { run.transDone = true; setupZone(run.zone + 1); }
+  if (st >= 1.6) { run.transDone = false; go('idle'); }
+}
+function gameOver() { saveBest(); SFX.lose(); go('over'); }
+// Retry the zone you died in with the buffs and coins you had when you entered it, and at least 3 hearts.
+function continueRun() {
+  const cp = run.cp, continues = (run.continues || 0) + 1;
+  run = JSON.parse(JSON.stringify(cp));
+  run.hp = Math.max(3, run.hp); run.continues = continues; run.newBest = false; run.newT = 0;
+  coinsShown = run.coins; B = null; F = null; INK = []; tension = 0;
+  setupZone(run.zone); go('idle'); SFX.click();
+}
+function winGame() { saveBest(); SFX.win(); go('win'); }
+
+// ============================================================ update
+function spawnAmbient(z, dt) {
+  bubbleT -= dt;
+  if (bubbleT <= 0) { bubbleT = rand(.2, .6); part({ type: 'bubble', x: rand(0, W), y: SEABED - 2, vy: -rand(12, 24), life: 14, col: 'rgba(255,255,255,.5)' }); }
+  if (z.fx === 'snow' && Math.random() < dt * 6) part({ x: rand(0, W), y: -2, vx: rand(-6, 6), vy: rand(10, 18), life: 8, col: '#ffffff', type: 'snow' });
+  if (z.fx === 'ash' && Math.random() < dt * 5) part({ x: rand(0, W), y: -2, vx: rand(-4, 4), vy: rand(6, 12), life: 9, col: pick(['#8a6a6a', '#ff9a5a']), type: 'snow' });
+  if (z.vents && Math.random() < dt * 4) { const [vx, vy] = pick(z.vents); part({ type: 'bubble', x: vx + rand(-2, 2), y: vy - 4, vy: -rand(20, 35), life: 8, col: pick(['#ff9a5a', '#ffd28a']) }); }
+}
+function update(dt, rdt) {
+  T += dt; st += rdt;
+  shake = Math.max(0, shake - rdt * 12); flash = Math.max(0, flash - rdt * 3);
+  if (catMoodT > 0) { catMoodT -= rdt; if (catMoodT <= 0) catMood = null; }
+  blinkT -= rdt; if (blinkT < -.14) blinkT = rand(2, 4.5);
+  if (zapBolt) { zapBolt.t -= rdt; if (zapBolt.t <= 0) zapBolt = null; }
+  if (run) { coinsShown += (run.coins - coinsShown) * Math.min(1, rdt * 4); if (Math.abs(run.coins - coinsShown) < .5) coinsShown = run.coins; if (run.newT > 0) run.newT -= rdt; }
+  coinSfxT -= rdt;
+  if (state === 'dex') return;
+  const z = Z();
+  for (let i = decor.length - 1; i >= 0; i--) {
+    const f = decor[i]; f.x += f.vx * dt * (f.flee ? 3 : 1); f.y += Math.sin(T * 1.3 + f.x * .05) * .05;
+    if (f.x < -40 || f.x > W + 40) { if (f.flee) decor.splice(i, 1); else decor[i] = newDecor(false); }
+  }
+  if (state !== 'warn' && state !== 'boss' && decor.filter(f => !f.flee).length < 4 && Math.random() < dt * .5) decor.push(newDecor(false));
+  spawnAmbient(z, dt);
+  if (run && run.zap > 0 && Math.random() < rdt * 3) { const t = tipPos(); part({ x: t.x + rand(-2, 2), y: t.y + rand(-2, 2), vx: rand(-15, 15), vy: rand(-20, 5), life: .35, col: '#fff27a' }); }
+  for (let i = P.length - 1; i >= 0; i--) {
+    const p = P[i]; p.age += dt; p.life -= dt;
+    if (p.type === 'coin' && p.age > .45) {
+      const tx = 122, ty = 6; p.x += (tx - p.x) * Math.min(1, dt * 9); p.y += (ty - p.y) * Math.min(1, dt * 9);
+      if (Math.abs(p.x - tx) < 3 && Math.abs(p.y - ty) < 3) { P.splice(i, 1); if (coinSfxT <= 0) { SFX.coin(); coinSfxT = .05; } continue; }
+    } else {
+      p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+      if (p.type === 'bubble') { p.x += Math.sin(p.age * 4 + p.y) * .15; if (p.y < SURF + 1) p.life = 0; }
+      if (p.type === 'snow') { p.x += Math.sin(p.age * 2 + p.y * .1) * .2; if (p.y > SURF - 1) p.life = 0; }
+    }
+    if (p.life <= 0) P.splice(i, 1);
+  }
+  for (let i = INK.length - 1; i >= 0; i--) { INK[i].life -= dt; if (INK[i].life <= 0) INK.splice(i, 1); }
+  for (let i = POPS.length - 1; i >= 0; i--) { const p = POPS[i]; p.life -= rdt; p.y -= 14 * rdt; if (p.life <= 0) POPS.splice(i, 1); }
+
+  switch (state) {
+    case 'cast': updCast(dt); break;
+    case 'wait': updWait(dt); break;
+    case 'fight': updFight(dt); break;
+    case 'leap': updLeap(rdt); break;
+    case 'show': if (st > 1.6) endShow(); break;
+    case 'warn': updWarn(); break;
+    case 'boss': updBoss(dt); break;
+    case 'trans': updTrans(); break;
+    case 'pause': if (st >= pauseDur) { const f = pauseNext; pauseNext = null; f(); } break;
+  }
+}
+
+// ============================================================ drawing primitives
+function pline(x0, y0, x1, y1, col, w) {
+  w = w || 1; x0 = R(x0); y0 = R(y0); x1 = R(x1); y1 = R(y1); g.fillStyle = col;
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let e = dx + dy;
+  for (let i = 0; i < 2000; i++) {
+    g.fillRect(x0, y0, w, w); if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; }
+  }
+}
+function pcurve(x0, y0, cx, cy, x1, y1, col, w) {
+  const n = Math.max(4, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 4)); let px = x0, py = y0;
+  for (let i = 1; i <= n; i++) {
+    const t = i / n, a = (1 - t) * (1 - t), b = 2 * (1 - t) * t, c = t * t;
+    const x = a * x0 + b * cx + c * x1, y = a * y0 + b * cy + c * y1; pline(px, py, x, y, col, w); px = x; py = y;
+  }
+}
+function disc(x, y, r, col) {
+  x = R(x); y = R(y); g.fillStyle = col;
+  if (r <= .6) { g.fillRect(x, y, 1, 1); return; }
+  const Rr = Math.ceil(r);
+  for (let dy = -Rr; dy <= Rr; dy++) { if (r * r - dy * dy < 0) continue; const hw = R(Math.sqrt(r * r - dy * dy)); g.fillRect(x - hw, y + dy, hw * 2 + 1, 1); }
+}
+// Draws an outlined tentacle and returns its points so the root can be re-painted over the body (capBase).
+function tentacle(x, y, ang, len, th, col, dot, ph, amp) {
+  const n = Math.floor(len / 2), pts = []; let a = ang;
+  for (let i = 0; i < n; i++) { pts.push([x, y, th * (1 - i / n) + .6]); a += Math.sin(T * 2.2 + ph + i * .3) * amp * .06; x += Math.cos(a) * 2; y += Math.sin(a) * 2; }
+  for (const p of pts) disc(p[0], p[1], p[2] + 1, OUT);
+  for (const p of pts) disc(p[0], p[1], p[2], col);
+  g.fillStyle = dot; for (let i = 3; i < pts.length; i += 3) g.fillRect(R(pts[i][0]), R(pts[i][1]), 1, 1);
+  return pts;
+}
+// Paints the first k tentacle segments on top of the body sprite so the body's outline doesn't cut the tentacle off.
+function capBase(pts, k, col) { for (let i = 0; i < Math.min(k, pts.length); i++) disc(pts[i][0], pts[i][1], pts[i][2], col); }
+function txt(s, x, y, size, col, align, stroke, alpha) { TQ.push({ s, x, y, size: size || 8, col: col || '#ffffff', align: align || 'center', stroke: stroke === undefined ? OUT : stroke, alpha: alpha === undefined ? 1 : alpha }); }
+function panel(x, y, w, h) {
+  g.fillStyle = OUT; g.fillRect(x, y, w, h);
+  g.fillStyle = '#8a5a34'; g.fillRect(x + 1, y + 1, w - 2, h - 2);
+  g.fillStyle = '#b77b46'; g.fillRect(x + 2, y + 2, w - 4, 1);
+  g.fillStyle = OUT; g.fillRect(x + 3, y + 3, w - 6, h - 6);
+  g.fillStyle = '#f6e3b4'; g.fillRect(x + 4, y + 4, w - 8, h - 8);
+  g.fillStyle = '#fff3d0'; g.fillRect(x + 4, y + 4, w - 8, 1);
+  g.fillStyle = '#e8cf98'; g.fillRect(x + 4, y + h - 5, w - 8, 1);
+}
+function button(r, label) {
+  const [x, y, w, h] = r;
+  g.fillStyle = OUT; g.fillRect(x, y, w, h);
+  g.fillStyle = '#b8642a'; g.fillRect(x + 1, y + 1, w - 2, h - 2);
+  g.fillStyle = '#f0a048'; g.fillRect(x + 1, y + 1, w - 2, h - 4);
+  g.fillStyle = '#ffc878'; g.fillRect(x + 2, y + 2, w - 4, 1);
+  txt(label, x + w / 2, y + h / 2 - 1, 8, '#ffffff', 'center', OUT);
+}
+function drawFishAt(key, mx, my, face, mode) {
+  const S = SPR[key], m = SP[key].mouth;
+  const left = face > 0 ? mx - m[0] : mx - (S.w - 1 - m[0]), top = my - m[1];
+  const img = mode === 'w' ? (face > 0 ? S.wr : S.wl) : mode === 'y' ? (face > 0 ? S.yr : S.yl) : mode === 'g' ? (face > 0 ? S.gr : S.gl) : (face > 0 ? S.r : S.l);
+  g.drawImage(img, R(left), R(top));
+}
+function drawFit(img, cx, cy, maxW, maxH, upTo) {
+  const s = Math.min(upTo || 1, maxW / img.width, maxH / img.height), sc = s >= 1 ? Math.floor(s) : s;
+  const w = R(img.width * sc), h = R(img.height * sc);
+  g.drawImage(img, R(cx - w / 2), R(cy - h / 2), w, h);
+}
+function lineColor() { if (!run) return '#f4f4f4'; return run.line < .6 ? '#ffe38a' : run.line < .9 ? '#9ff3ff' : '#f4f4f4'; }
+
+// ============================================================ scene drawing
+function drawSky(z) {
+  for (const s of STARS) { g.globalAlpha = .4 + .6 * Math.abs(Math.sin(T * 1.5 + s.ph)); g.fillStyle = '#ffffff'; g.fillRect(s.x, s.y, 1, 1); }
+  g.globalAlpha = 1;
+  if (z.orb === 'sun') { g.globalAlpha = .35; disc(100, 38, 13, '#fff6c8'); g.globalAlpha = 1; g.drawImage(I.sun, 90, 28); }
+  if (z.orb === 'moon') g.drawImage(I.moon, 92, 26);
+  for (const c of CLOUDS) g.drawImage(I.cloud, R(((c.x + T * c.v) % (W + 50)) - 30), c.y);
+}
+function drawShafts(z) {
+  if (!z.shafts) return;
+  g.save(); g.globalAlpha = .07; g.fillStyle = '#ffffff';
+  for (let i = 0; i < 3; i++) {
+    const x0 = 40 + i * 55 + Math.sin(T * .3 + i) * 8;
+    g.beginPath(); g.moveTo(x0, SURF); g.lineTo(x0 + 12, SURF); g.lineTo(x0 - 18, SEABED); g.lineTo(x0 - 40, SEABED); g.fill();
+  }
+  g.restore();
+}
+function drawFog(z) {
+  if (z.fx !== 'fog') return;
+  g.fillStyle = '#cfe8e0';
+  for (let i = 0; i < 3; i++) {
+    g.globalAlpha = .09;
+    const y = 120 + i * 60 + Math.sin(T * .4 + i) * 6, off = (T * (6 + i * 3)) % 60;
+    for (let x = -60; x < W + 60; x += 60) g.fillRect(R(x + off), R(y), 40, 10);
+  }
+  g.globalAlpha = 1;
+}
+function drawWeeds(z) {
+  for (const w of WEEDS) {
+    for (let i = 0; i < w.h; i++) {
+      const xx = w.x + R(Math.sin(T * 1.4 + w.ph + i * .18) * (i / w.h) * 3);
+      g.fillStyle = i % 4 < 2 ? w.col : z.weed[1]; g.fillRect(xx, SEABED + 2 - i, 2, 1);
+      if (z.glowWeed && i === w.h - 1) { g.fillStyle = '#8fffe6'; g.fillRect(xx, SEABED + 1 - i, 2, 2); }
+    }
+  }
+  if (z.vents) z.vents.forEach(([vx, vy], i) => { g.globalAlpha = .25 + .15 * Math.sin(T * 3 + i); disc(vx, vy - 3, 7, '#ff7a2a'); g.globalAlpha = 1; });
+}
+function drawSurface(z) {
+  for (let x = 0; x < W; x++) {
+    const h = Math.sin(x * .28 + T * 2.2) + Math.sin(x * .11 - T * 1.3) * .6, hh = h > .6 ? 2 : (h > -.3 ? 1 : 0);
+    if (hh) { g.fillStyle = z.water[0]; g.fillRect(x, SURF - hh, 1, hh); }
+    if (h > 1.1) { g.fillStyle = z.hl; g.fillRect(x, SURF - hh, 1, 1); }
+  }
+  g.globalAlpha = .45; g.fillStyle = z.hl; g.fillRect(0, SURF, W, 1); g.globalAlpha = 1;
+  if (z.floes) { const b = R(Math.sin(T * 1.2 + 1)); g.drawImage(I.floe, 150, SURF - 3 + b); g.drawImage(I.floe, 58, SURF - 2 - b); }
+}
+function drawCat() {
+  const b = bobY();
+  g.drawImage(T % 2.4 < .25 ? I.tailB : I.tail, BX + 4, SURF - 15 + b);
+  const face = catMood || (blinkT < 0 ? 'blink' : 'normal');
+  g.drawImage(I.cat[face], BX + 9, SURF - 26 + b);
+  g.drawImage(I.boat, BX, SURF - 7 + b);
+}
+function drawRodLine() {
+  const h = handPos(), t = tipPos(), rc = run && run.gold > 1 ? '#ffcf3a' : '#8a5428';
+  pcurve(h.x, h.y + 1, h.x + 10, h.y - 15, t.x, t.y + 1, OUT);
+  pcurve(h.x, h.y, h.x + 10, h.y - 16, t.x, t.y, rc);
+  g.fillStyle = '#3a2414'; g.fillRect(h.x - 1, h.y - 1, 3, 3);
+  const lc = lineColor();
+  const lineTo = (x, y) => {
+    const sag = (1 - Math.min(1, tension / 60)) * 10;
+    let c = lc; if (tension > 70) c = Math.floor(T * 12) % 2 ? '#ff4a3a' : '#ffffff'; else if (tension > 45) c = '#ffd23f';
+    pcurve(t.x, t.y, (t.x + x) / 2, (t.y + y) / 2 + sag, x, y, c);
+  };
+  if (state === 'cast' && cast) { pline(t.x, t.y, cast.bx, cast.by, lc); g.drawImage(I.bobber, R(cast.bx - 2), R(cast.by - 3)); }
+  else if (state === 'wait' && bob) {
+    const by = SURF - 4 + R(bob.dip) + R(Math.sin(T * 2) * .6);
+    pcurve(t.x, t.y, (t.x + bob.x) / 2, (t.y + by) / 2 + 10, bob.x, by, lc);
+    g.globalAlpha = .5; pline(bob.x, by + 5, hook.x, hook.y, lc); g.globalAlpha = 1;
+    g.drawImage(I.hook, R(hook.x - 2), R(hook.y - 1));
+    g.drawImage(I.bobber, R(bob.x - 2), by);
+  }
+  else if (state === 'fight' && F) lineTo(F.x, F.y);
+  else if (state === 'boss' && B) lineTo(B.px, B.py);
+  else { const sw = Math.sin(T * 1.5) * 1.5; pline(t.x, t.y, t.x + sw, t.y + 12, lc); g.drawImage(I.hook, R(t.x + sw - 2), R(t.y + 11)); }
+}
+function drawFight() {
+  const f = F; let mode = f.shiny ? 'g' : null;
+  if (f.stun > 0 && Math.floor(T * 16) % 2 === 0) mode = 'y';
+  else if (f.state === 'tele' && Math.floor(T * 14) % 2 === 0) mode = 'w';
+  const jx = isDashing(f) ? (Math.random() < .5 ? -1 : 1) : 0;
+  drawFishAt(f.key, f.x + jx, f.y, f.face, mode);
+  if (f.state === 'tele') { const S = SPR[f.key]; g.drawImage(I.bang, R(f.x - f.face * S.w / 2 - 2), R(f.y - S.h / 2 - 13)); }
+}
+function drawBoss() {
+  const b = B, fl = b.state === 'tele' && Math.floor(T * 14) % 2 === 0, stun = b.stun > 0 && Math.floor(T * 16) % 2 === 0;
+  const img = (S, left) => left ? (stun ? S.yl : fl ? S.wl : S.l) : (stun ? S.yr : fl ? S.wr : S.r);
+  let top;
+  if (b.key === 'puffer') {
+    const S = b.infl > .5 ? SPRB.pufferBig : SPRB.puffer;
+    top = R(b.y - S.h / 2); g.drawImage(img(S, true), R(b.x - S.w / 2), top);
+  } else if (b.key === 'squid') {
+    const S = SPRB.squid, roots = [];
+    for (let i = 0; i < 8; i++) { const long = i === 2 || i === 5; roots.push(tentacle(b.x - 6 + i * 1.7, b.y + 37, Math.PI / 2 + (i - 3.5) * .13, long ? 46 : 26, 2.3, '#e05a50', '#ffb3a8', i * .9, 1.4)); }
+    top = R(b.y); g.drawImage(img(S, false), R(b.x - S.w / 2), top);
+    roots.forEach(p => capBase(p, 3, stun ? '#fff27a' : fl ? '#ffffff' : '#e05a50'));
+  } else if (b.key === 'crab') {
+    const S = SPRB.crab, jx = isDashing(b) ? R(Math.sin(T * 40)) : 0;
+    top = R(b.y); g.drawImage(img(S, false), R(b.x - S.w / 2) + jx, top);
+  } else if (b.key === 'ghost') {
+    const S = SPRB.ghost; top = R(b.y - S.h / 2);
+    g.globalAlpha = b.alpha * (.85 + .15 * Math.sin(T * 5)); g.drawImage(img(S, true), R(b.x - S.w / 2), top); g.globalAlpha = 1;
+  } else if (b.key === 'serpent') {
+    const S = SPRB.serpent, tlx = R(b.x - 17), tly = R(b.y - 12), nx = tlx + 29, ny = tly + 14, segs = [];
+    for (let i = 1; i <= 14; i++) segs.push([nx + i * 4.2, ny + i * 2 + Math.sin(T * 2.4 - i * .55) * 5 * Math.min(1, i / 3), Math.max(1.8, 6.5 - i * .32)]);
+    for (let i = segs.length - 1; i >= 0; i--) { const [x, y, r] = segs[i]; disc(x, y, r + 1, OUT); disc(x, y, r, i % 3 === 1 ? '#8a5448' : '#6a3e3a'); if (i % 2 === 0) { g.fillStyle = '#ffb03a'; g.fillRect(R(x), R(y - r * .4), 1, 1); } }
+    top = tly; g.drawImage(img(S, true), tlx, tly);
+  } else {
+    const S = SPRB.kraken, dash = isDashing(b), sw = dash ? Math.sin(T * 12) * .3 : 0;
+    tentacle(b.x + 30 * b.side, b.y + 30, -Math.PI / 2 + .45 * b.side + sw, 22 + 56 * b.arm, 6, '#6b3d8f', '#e9b8ff', 2, .8);
+    tentacle(b.x - 30 * b.side, b.y + 34, -Math.PI / 2 - .5 * b.side, 26, 5, '#6b3d8f', '#e9b8ff', 4, .8);
+    const roots = [-28, -17, -7, 7, 17, 28].map((ox, i) => tentacle(b.x + ox, b.y + 50, Math.PI / 2 + ox * .016, 40, 5.5, '#6b3d8f', '#e9b8ff', i * 1.1, 1.3));
+    g.globalAlpha = .25 + .15 * Math.sin(T * 3); disc(b.x - 17, b.y + 36, 11, '#ffdf4a'); disc(b.x + 17, b.y + 36, 11, '#ffdf4a'); g.globalAlpha = 1;
+    top = R(b.y); g.drawImage(img(S, false), R(b.x - S.w / 2), top);
+    roots.forEach(p => capBase(p, 4, stun ? '#fff27a' : fl ? '#ffffff' : '#6b3d8f'));
+  }
+  if (b.state === 'tele') g.drawImage(b.erupt ? I.bangY : I.bang, R(b.x - 2), top - 13);
+}
+function drawParts() {
+  for (const p of P) {
+    if (p.type === 'coin') { g.fillStyle = OUT; g.fillRect(R(p.x) - 1, R(p.y) - 1, 5, 5); g.fillStyle = '#ffd23f'; g.fillRect(R(p.x), R(p.y), 3, 3); g.fillStyle = '#fff6c0'; g.fillRect(R(p.x), R(p.y), 1, 1); continue; }
+    g.globalAlpha = p.type === 'bubble' || p.type === 'snow' ? 1 : Math.min(1, p.life / p.max * 2);
+    g.fillStyle = p.col; g.fillRect(R(p.x), R(p.y), p.s, p.s);
+  }
+  g.globalAlpha = 1;
+}
+function drawInk() {
+  for (const k of INK) {
+    const r = k.r * Math.min(1, (k.max - k.life) * 5) * Math.min(1, k.life * 1.5);
+    g.globalAlpha = .93; disc(k.x, k.y, r, '#140e26'); g.globalAlpha = .5; disc(k.x - r * .3, k.y - r * .3, r * .3, '#2a2048');
+  }
+  g.globalAlpha = 1;
+}
+function drawBolt() {
+  if (!zapBolt) return;
+  const p = zapBolt.pts;
+  for (let i = 1; i < p.length; i++) { pline(p[i - 1][0], p[i - 1][1] + 1, p[i][0], p[i][1] + 1, '#c9a400'); pline(p[i - 1][0], p[i - 1][1], p[i][0], p[i][1], '#fff27a'); }
+}
+function drawLeap() {
+  const p = leapPos(), s = p.sc, w = leap.w * s, h = leap.h * s;
+  g.drawImage(leap.img, R(p.x - w / 2), R(p.y - h / 2), R(w), R(h));
+}
+
+// ============================================================ HUD + overlays
+function drawHUD(z) {
+  if (!run || state === 'title' || state === 'dex') return;
+  const n = Math.max(3, run.hp);
+  for (let i = 0; i < n; i++) g.drawImage(i < run.hp ? I.heart : I.heartE, 2 + i * 9, 2);
+  g.drawImage(I.coin, 118, 2); txt(String(R(coinsShown)), 129, 7, 8, '#ffe14a', 'left');
+  txt(z.name, 3, 17, 7, '#ffffff', 'left');
+  for (let i = 0; i < NEED; i++) {
+    const x = 128 + i * 7; g.fillStyle = OUT; g.fillRect(x, 14, 6, 6);
+    g.fillStyle = i < run.zoneCaught ? '#ffd23f' : '#46506a'; g.fillRect(x + 1, 15, 4, 4);
+  }
+  if (!run.bossDone) g.drawImage(I.skull, 128 + NEED * 7, 12);
+  const shown = run.order.filter(k => run.stacks[k] > 0);
+  if (shown.length) {
+    g.globalAlpha = .6; g.fillStyle = '#0f0f23'; g.fillRect(0, 305, W, 15); g.globalAlpha = 1;
+    shown.forEach((k, i) => {
+      const x = 2 + i * 16;
+      if (run.newBuff === k && run.newT > 0 && Math.floor(T * 10) % 2 === 0) { g.fillStyle = '#fff27a'; g.fillRect(x - 1, 306, 11, 11); }
+      g.drawImage(I[k], x, 307); txt(String(run.stacks[k]), x + 10, 314, 6, '#ffffff', 'left');
+    });
+  }
+}
+function drawTension(hidden) {
+  const x = 171, y0 = 104, h = 150;
+  g.fillStyle = OUT; g.fillRect(x - 1, y0 - 1, 7, h + 2);
+  g.fillStyle = '#2a2f45'; g.fillRect(x, y0, 5, h);
+  if (hidden) { txt('?', x + 2.5, y0 + h / 2, 10, '#cfeee8'); return; }
+  const fh = R(h * Math.min(100, tension) / 100);
+  g.fillStyle = tension > 70 ? (Math.floor(T * 12) % 2 ? '#ff4a3a' : '#ff9a8a') : tension > 45 ? '#ffd23f' : '#5fd35f';
+  g.fillRect(x, y0 + h - fh, 5, fh);
+  g.fillStyle = '#ff4a3a'; g.fillRect(x - 2, y0 + R(h * .3), 9, 1);
+}
+function drawOverlay(z) {
+  if (state === 'title') {
+    [[-1, 26], [1, 22]].forEach(([s, h], i) => tentacle(90 + s * 70, H + 4, -Math.PI / 2 - s * .25, 60 + h, 5, '#6b3d8f', '#e9b8ff', i * 2, 1.2));
+    txt('渔喵传说', 90, 128, 28, '#ffe14a', 'center', OUT);
+    txt('FISHY TAILS', 90, 150, 9, '#9fe8ff', 'center', OUT);
+    txt('猫猫钓鱼 · 吃Buff · 打海怪', 90, 166, 9, '#ffffff');
+    if (Math.floor(T * 2) % 2 === 0) txt('点击开始', 90, 208, 12, '#ffffff');
+    g.drawImage(I.hand, 104, 218 + R(Math.abs(Math.sin(T * 4)) * -4));
+    button(BTN.titleDex, '图鉴 ' + dexCount() + '/' + DEX_TOTAL);
+    if (best > 0) txt('最高纪录 ' + best + ' 金币', 90, 282, 8, '#ffe14a');
+    return;
+  }
+  if (state === 'dex') { drawDex(); return; }
+  if (state === 'idle') {
+    g.drawImage(I.hand, 120, 190 + R(Math.abs(Math.sin(T * 4)) * -5));
+    txt('点击抛竿', 124, 214, 10, '#ffffff');
+  }
+  if (state === 'wait' && biter && biter.ph === 'bite') {
+    g.drawImage(I.bangY, R(bob.x - 2), SURF - 22 + R(Math.sin(T * 20)));
+    if (run.fights < 3) txt('按住!', bob.x, SURF - 30, 11, '#ffe14a');
+  }
+  if (state === 'fight' || state === 'boss') {
+    const A = state === 'fight' ? F : B;
+    drawTension(state === 'boss' && B && B.invis);
+    if (hold && tension > 60) txt('松手!', 150, 96, 12, '#ff5a4a');
+    else if (!hold && A && A.state === 'calm' && run.fights <= 3) txt('按住收线', 90, 288, 10, '#ffffff');
+    if (A && A.frenzy > 0) {
+      g.globalAlpha = .12 + .08 * Math.sin(T * 20); g.fillStyle = '#ffd23f'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+      txt('狂收!!', 90, 100, 16, '#ffe14a');
+    }
+    if (state === 'boss' && B) {
+      g.fillStyle = OUT; g.fillRect(29, 26, 122, 7);
+      g.fillStyle = '#2a2f45'; g.fillRect(30, 27, 120, 5);
+      g.fillStyle = '#ff6a4a'; g.fillRect(30, 27, R(120 * (1 - B.p)), 5);
+      g.fillStyle = '#ffb3a0'; g.fillRect(30, 27, R(120 * (1 - B.p)), 1);
+      if (B.key === 'kraken') { g.fillStyle = OUT; g.fillRect(70, 26, 1, 7); g.fillRect(110, 26, 1, 7); }
+      txt(B.d.name, 90, 39, 8, '#ffd0c0');
+    }
+  }
+  if (state === 'warn') {
+    g.globalAlpha = .35; g.fillStyle = '#200010'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+    for (let x = -20; x < W + 20; x += 12) {
+      const o = R((T * 30) % 12);
+      g.fillStyle = '#ff3b3b'; g.beginPath(); g.moveTo(x + o, 112); g.lineTo(x + o + 6, 112); g.lineTo(x + o, 126); g.lineTo(x + o - 6, 126); g.fill();
+    }
+    g.fillStyle = OUT; g.fillRect(0, 111, W, 1); g.fillRect(0, 126, W, 1);
+    if (Math.floor(T * 6) % 2 === 0) txt('危 险', 90, 119, 12, '#ffffff');
+    txt(B.d.name + ' 来袭!', 90, 146, 13, '#ff8a7a');
+  }
+  if (state === 'show' && show) drawCard();
+  if (state === 'trans') {
+    const a = st < .4 ? st / .4 : st < 1.2 ? 1 : Math.max(0, 1 - (st - 1.2) / .4);
+    g.globalAlpha = a; g.fillStyle = '#05060f'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+    if (st > .4 && st < 1.4) { txt('第 ' + (run.zone + 1) + ' / ' + ZONES.length + ' 片海域', 90, 140, 9, '#aab4d8'); txt(ZONES[run.zone].name, 90, 162, 18, '#ffe14a'); }
+  }
+  if (state === 'over' || state === 'win') {
+    g.globalAlpha = .5; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+    panel(18, 92, 144, 152);
+    const win = state === 'win', dark = '#4a2c17';
+    txt(win ? '征服深渊!' : '鱼线断光了', 90, 110, 14, win ? '#c0392b' : dark, 'center', null);
+    txt('钓到 ' + run.fishTotal + ' 条鱼' + (run.continues ? ' · 续关 ' + run.continues + ' 次' : ''), 90, 132, 9, dark, 'center', null);
+    txt('金币 ' + run.coins, 90, 146, 9, '#9a6a00', 'center', null);
+    txt('到达 ' + ZONES[run.zone].name, 90, 160, 9, dark, 'center', null);
+    txt(run.newBest ? '新纪录!' : '最高纪录 ' + best, 90, 177, 9, run.newBest ? '#c0392b' : '#8a6a4a', 'center', null);
+    if (st > .5) {
+      if (!win) button(BTN.cont, '从 ' + ZONES[run.zone].name + ' 继续');
+      button(BTN.again, win ? '再来一次' : '从头开始'); button(BTN.overDex, '图鉴');
+    }
+    if (win && Math.random() < .15) sparks(rand(20, 160), rand(30, 90), pick(['#ffe14a', '#ff6fae', '#6fe3ff']), 14, 60);
+  }
+}
+function drawCard() {
+  const sh = show;
+  g.globalAlpha = .45; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+  const py = sh.boss ? 70 : 84, ph = sh.boss ? 156 : 128;
+  panel(12, py, 156, ph);
+  g.save(); g.beginPath(); g.rect(16, py + 4, 148, ph - 8); g.clip();
+  g.globalAlpha = sh.shiny ? .7 : .45; g.fillStyle = sh.shiny ? '#ffd23f' : '#ffe9a0';
+  const cy = sh.boss ? 140 : 136;
+  for (let i = 0; i < 10; i++) { const a = T * .6 + i * Math.PI / 5; g.beginPath(); g.moveTo(90, cy); g.lineTo(90 + Math.cos(a - .13) * 90, cy + Math.sin(a - .13) * 90); g.lineTo(90 + Math.cos(a + .13) * 90, cy + Math.sin(a + .13) * 90); g.fill(); }
+  g.restore(); g.globalAlpha = 1;
+  const w = sh.w * sh.sc, h = sh.h * sh.sc, bounce = st < .3 ? R(Math.sin(st * 20) * 2) : 0;
+  g.drawImage(sh.img, R(90 - w / 2), R(cy - h / 2) + bounce, w, h);
+  if (sh.shiny && Math.random() < .3) sparks(90 + rand(-w / 2, w / 2), cy + rand(-h / 2, h / 2), '#fff6c0', 2, 20);
+  const dark = '#4a2c17';
+  if (sh.first) txt('NEW!', 150, py + 12, 9, '#e8453c', 'center', '#fff3d0');
+  if (sh.boss) {
+    txt('击败 ' + sh.name + '!', 90, py + 14, 12, '#c0392b', 'center', null);
+    g.drawImage(I.heart, 44, 196); txt('生命+1', 56, 201, 10, '#c0392b', 'left', null);
+    g.drawImage(I.coin, 100, 196); txt('+' + sh.val, 111, 201, 10, '#9a6a00', 'left', null);
+  } else {
+    txt(sh.name, 90, py + 13, 11, dark, 'center', null);
+    txt(sh.cm + ' cm' + (sh.record ? '  新纪录!' : ''), 90, py + 25, 8, sh.record ? '#c0392b' : '#8a6a4a', 'center', null);
+    if (sh.shiny) txt('闪光!', 32, py + 12, 10, '#e89a00', 'center', '#fff3d0');
+    g.drawImage(I[sh.buff], 44, 164, 18, 18);
+    txt(sh.label + (sh.shiny ? ' ×2' : ''), 68, 173, 11, '#7a3b12', 'left', null);
+    g.drawImage(I.coin, 72, 190); txt('+' + sh.val, 83, 195, 9, '#9a6a00', 'left', null);
+  }
+}
+function drawDex() {
+  g.globalAlpha = .75; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+  panel(4, 24, 172, 270);
+  const zi = dexPage, z = ZONES[zi], known = zi <= DEX.zone, dark = '#4a2c17';
+  txt(known ? z.name : '???', 90, 40, 12, dark, 'center', null);
+  txt('已收集 ' + dexCount() + ' / ' + DEX_TOTAL, 90, 53, 7, '#8a6a4a', 'center', null);
+  button(BTN.dexClose, '×');
+  const row = (y, h) => { g.fillStyle = '#c9a86a'; g.fillRect(11, y, 158, h); g.fillStyle = '#ecd49c'; g.fillRect(12, y + 1, 156, h - 2); };
+  z.fish.forEach((k, i) => {
+    const y = 60 + i * 42, d = DEX.fish[k], S = SPR[k], sp = SP[k];
+    row(y, 40);
+    drawFit(d ? (d.shiny ? S.gr : S.r) : S.sil, 37, y + 20, 44, 32, 2);
+    if (d && d.shiny) g.drawImage(I.star, 14, y + 3);
+    txt(d ? sp.name : '???', 64, y + 10, 9, dark, 'left', null);
+    if (d) {
+      g.drawImage(I[sp.buff], 63, y + 17);
+      txt(sp.label, 76, y + 22, 7, '#7a3b12', 'left', null);
+      txt('最大 ' + d.max + 'cm   ×' + d.n, 64, y + 33, 7, '#8a6a4a', 'left', null);
+    } else txt(known ? '还没钓到' : '未到达', 64, y + 24, 7, '#a08a6a', 'left', null);
+  });
+  const bk = z.boss, bd = DEX.boss[bk], y = 228;
+  g.fillStyle = '#8a4a3a'; g.fillRect(11, y, 158, 40); g.fillStyle = '#e8c0a0'; g.fillRect(12, y + 1, 156, 38);
+  const img = BOSSES[bk].card();
+  if (bd) drawFit(img, 37, y + 20, 44, 34); else g.drawImage(I.skull, 32, y + 15);
+  txt(bd ? BOSSES[bk].name : '???', 64, y + 12, 9, '#7a2a1a', 'left', null);
+  txt(bd ? '击败 ×' + bd.n : '海怪', 64, y + 27, 7, '#8a5a4a', 'left', null);
+  button(BTN.dexPrev, '◀'); button(BTN.dexNext, '▶');
+  txt((zi + 1) + ' / ' + ZONES.length, 90, 279, 8, dark, 'center', null);
+}
+
+// ============================================================ render
+function render() {
+  TQ.length = 0;
+  const z = Z();
+  g.imageSmoothingEnabled = false; g.globalAlpha = 1;
+  g.drawImage(getBg(curZone()), 0, 0);
+  drawSky(z); drawShafts(z); drawWeeds(z);
+  for (const f of decor) drawFishAt(f.key, f.x, f.y, f.vx > 0 ? 1 : -1);
+  if (B) drawBoss();
+  if (biter) drawFishAt(biter.key, biter.x, biter.y, biter.face, biter.shiny ? 'g' : null);
+  if (F) drawFight();
+  drawCat(); drawRodLine(); drawSurface(z); drawFog(z);
+  drawParts(); drawInk(); drawBolt();
+  if (state === 'leap' && leap) drawLeap();
+  drawHUD(z);
+  g.drawImage(muted ? I.mute : I.sound, 168, 3);
+  drawOverlay(z);
+  for (const p of POPS) txt(p.s, p.x, p.y, p.size, p.col, 'center', OUT, Math.min(1, p.life / p.max * 2));
+  if (flash > 0) { g.globalAlpha = Math.min(.8, flash); g.fillStyle = '#ffffff'; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false; ctx.globalAlpha = 1;
+  ctx.fillStyle = '#0b1020'; ctx.fillRect(0, 0, cv.width, cv.height);
+  const sx = shake > 0 ? R((Math.random() - .5) * shake * 2) : 0, sy = shake > 0 ? R((Math.random() - .5) * shake * 2) : 0;
+  ctx.drawImage(low, 0, 0, W, H, sx * K, sy * K, W * K, H * K);
+  ctx.setTransform(K, 0, 0, K, sx * K, sy * K);
+  ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  for (const t of TQ) {
+    ctx.globalAlpha = t.alpha; ctx.font = t.size + 'px ' + FONT; ctx.textAlign = t.align;
+    if (t.stroke) { ctx.lineWidth = Math.max(1.5, t.size * .28); ctx.strokeStyle = t.stroke; ctx.strokeText(t.s, t.x, t.y); }
+    ctx.fillStyle = t.col; ctx.fillText(t.s, t.x, t.y);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ============================================================ boot
+const ALLTEXT = [...new Set((SCRIPT_TEXT.match(/[^\x00-\x7f]/g) || []))].join('') + 'NEW!?0123456789+×/';
+try { if (document.fonts && document.fonts.load) document.fonts.load('12px "ZCOOL QingKe HuangYou"', ALLTEXT).catch(() => {}); } catch (e) {}
+setupZone(0);
+let last = performance.now();
+function frame(now) {
+  const rdt = Math.min(.05, (now - last) / 1000); last = now;
+  let dt = rdt; if (slowT > 0) { slowT -= rdt; dt *= .3; }
+  update(dt, rdt); render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
