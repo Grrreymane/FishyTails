@@ -818,9 +818,22 @@ const stockOf = k => DISH[k].boss ? (CAFE.boss[DISH[k].boss] || 0) : (CAFE.coole
 const totalStock = () => DISH_KEYS.reduce((s, k) => s + stockOf(k), 0);
 
 // ---------- service
-const cafe = { tab: 0, back: 'title', svc: false, cust: [], spawnT: 0, earned: 0, slot: 0, prev: null, detail: null, chefT: 0 };
+// The café is an isometric cut-away shop on a pier, rendered on its own 360x640 canvas (twice the game's
+// resolution); its menus are drawn on the normal 180x320 layer on top.
+const CW2 = 288, CH2 = 512, cafeCanvas = mk(CW2, CH2), CG = cafeCanvas.getContext('2d');
+const ISO = { ox: 144, oy: 196, n: 8, wh: 96 };
+const CS = W / CW2; // café pixel -> game pixel
+const isoPt = (i, j) => [ISO.ox + (i - j) * 16, ISO.oy + (i + j) * 8];
+const isoC = (i, j) => isoPt(i + .5, j + .5);
+const TABLES = [[3, 3], [5, 3], [3, 5], [5, 5], [6.8, 4.2]];
+const DOOR = isoPt(8.3, 7.4), OUTSIDE = isoPt(10.6, 7.6);
+function tankFish() {
+  const score = k => (DEX.fish[k].shiny ? 4 : 0) + (DEX.fish[k].gold ? 2 : 0);
+  return FISH_ORDER.filter(k => DEX.fish[k]).sort((a, b) => score(b) - score(a));
+}
+const cafe = { sheet: 0, back: 'title', svc: false, cust: [], spawnT: 0, earned: 0, slot: 0, prev: null, detail: null, chefT: 0 };
 const seatCount = eq => decoItem('seat', (eq || CAFE.deco.eq).seat).seats;
-const seatX = (i, n) => R(78 + i * (n > 1 ? 88 / (n - 1) : 0));
+const seatPos = k => { const [cx, cy] = isoC(...TABLES[k]); return [cx - 9, cy - 5]; };
 const arriveGap = () => 1.3 / (1 + (charm(CAFE.deco.eq) + Math.min(60, CAFE.pop / 2)) / 30);
 function nextDish() {
   const avail = DISH_KEYS.filter(k => stockOf(k) > 0);
@@ -832,7 +845,7 @@ function nextDish() {
   CAFE.sold[k] = (CAFE.sold[k] || 0) + 1;
   return { k, price: d.price * (prem ? 2 : 1), prem };
 }
-function openCafe(from) { cafe.back = from; cafe.cust = []; cafe.svc = false; cafe.detail = null; cafe.prev = null; go('cafe'); SFX.click(); }
+function openCafe(from) { cafe.back = from; cafe.cust = []; cafe.svc = false; cafe.detail = null; cafe.prev = null; cafe.sheet = totalStock() ? 0 : null; go('cafe'); SFX.click(); }
 function updCafe(dt) {
   cafe.chefT = Math.max(0, cafe.chefT - dt);
   if (!cafe.svc) return;
@@ -842,130 +855,262 @@ function updCafe(dt) {
     const d = nextDish();
     if (d) {
       let seat = 0; while (used.includes(seat)) seat++;
-      cafe.cust.push({ seat, look: newGuestLook(), t: 0, ph: 'walk', d, x: W + 16 });
+      cafe.cust.push({ seat, look: newGuestLook(), t: 0, ph: 'in', d, x: OUTSIDE[0], y: OUTSIDE[1], path: [DOOR, seatPos(seat)] });
       cafe.spawnT = arriveGap(); saveCafe();
     }
   }
   for (let i = cafe.cust.length - 1; i >= 0; i--) {
-    const c = cafe.cust[i], tx = seatX(c.seat, n); c.t += dt;
-    if (c.ph === 'walk') { c.x += Math.sign(tx - c.x) * Math.min(Math.abs(tx - c.x), 120 * dt); if (c.x === tx) { c.ph = 'eat'; c.t = 0; cafe.chefT = .5; } }
-    else if (c.ph === 'eat' && c.t > (c.look.size === 'l' ? 1.8 : 1.3)) {
-      const mult = decoItem('stove', CAFE.deco.eq.stove).mult * (c.look.size === 'l' ? 1.3 : 1);
-      const v = R(c.d.price * mult); earn(v); cafe.earned += v;
-      pop('+' + v, tx, 112, '#ffe14a', 9, .9); SFX.coin(); c.ph = 'leave'; c.t = 0;
-    } else if (c.ph === 'leave') { c.x += 140 * dt; if (c.x > W + 20) cafe.cust.splice(i, 1); }
+    const c = cafe.cust[i]; c.t += dt;
+    if (c.ph === 'eat') {
+      if (c.t > (c.look.size === 'l' ? 1.8 : 1.3)) {
+        const mult = decoItem('stove', CAFE.deco.eq.stove).mult * (c.look.size === 'l' ? 1.3 : 1);
+        const v = R(c.d.price * mult); earn(v); cafe.earned += v;
+        pop('+' + v, c.x * CS, c.y * CS - 22, '#ffe14a', 9, .9); SFX.coin();
+        c.ph = 'out'; c.path = [DOOR, OUTSIDE];
+      }
+      continue;
+    }
+    // walk along the path
+    let step = 80 * dt;
+    while (step > 0 && c.path.length) {
+      const [tx, ty] = c.path[0], dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy);
+      if (d <= step) { c.x = tx; c.y = ty; step -= d; c.path.shift(); } else { c.x += dx / d * step; c.y += dy / d * step; c.face = dx < 0 ? -1 : 1; step = 0; }
+    }
+    if (!c.path.length) {
+      if (c.ph === 'in') { c.ph = 'eat'; c.t = 0; cafe.chefT = .5; }
+      else cafe.cust.splice(i, 1);
+    }
   }
-  if (!cafe.cust.length && totalStock() === 0) { cafe.svc = false; saveCafe(); pop('打烊啦! +' + cafe.earned, 110, 60, '#ffe14a', 12, 2); SFX.caught(); }
+  if (!cafe.cust.length && totalStock() === 0) { cafe.svc = false; saveCafe(); pop('打烊啦! +' + cafe.earned, 90, 60, '#ffe14a', 12, 2); SFX.caught(); }
 }
 
-// ---------- scene
-function tankFish() {
-  const caught = FISH_ORDER.filter(k => DEX.fish[k]);
-  return caught.sort((a, b) => ((DEX.fish[b].shiny ? 4 : 0) + (DEX.fish[b].gold ? 2 : 0)) - ((DEX.fish[a].shiny ? 4 : 0) + (DEX.fish[a].gold ? 2 : 0)));
+// ---------- full-body cat guests (walk frames 1/2, stand 0)
+function guestBodySpr(l, frame) {
+  const big = l.size === 'l', f = big ? BIG[l.kind] : FUR[l.kind];
+  const D = { s: { w: 16, h: 22, cx: 8, cy: 6.5, rx: 5, ry: 4.4, bx: 4.5, by: 14.5, bry: 3.6, legY: 17, legH: 4, lw: 2 },
+              m: { w: 18, h: 27, cx: 9, cy: 7.5, rx: 5.6, ry: 4.8, bx: 5.3, by: 17, bry: 4.8, legY: 21, legH: 5, lw: 2 },
+              l: { w: 24, h: 35, cx: 12, cy: 10, rx: 7.3, ry: 6.3, bx: 7.2, by: 23, bry: 6.2, legY: 28, legH: 6, lw: 3 } }[l.size];
+  return paint(D.w + 4, D.h, G => {
+    const cx = D.cx, cy = D.cy, rx = D.rx, ry = D.ry;
+    for (let k = 0; k < 7; k++) G.set(R(cx + D.bx - 1 + Math.min(k, 3) * .8), R(D.by + 1 - k), k > 4 ? f.D : f.O);
+    const up = [[0, 0], [1, 0], [0, 1]][frame];
+    [[cx - 1 - D.lw, up[0]], [cx + 1, up[1]]].forEach(([x, u]) => { G.rect(R(x), D.legY, D.lw, D.legH - u, f.O); G.rect(R(x), D.legY + D.legH - u - 1, D.lw, 1, f.W); });
+    G.ell(cx, D.by, D.bx, D.bry, l.cloth);
+    G.ell(cx - D.bx + .5, D.by + .5, 1.6, D.bry * .7, l.cloth); G.ell(cx + D.bx - .5, D.by + .5, 1.6, D.bry * .7, l.cloth);
+    G.set(R(cx - D.bx + .5), R(D.by + D.bry * .7), f.W); G.set(R(cx + D.bx - .5), R(D.by + D.bry * .7), f.W);
+    const neck = cy + ry;
+    if (l.acc === 'suit') { G.tri(cx - 2.5, neck, cx + 2.5, neck, cx, neck + D.bry * 1.6, '#f4f4f4'); G.rect(R(cx) - 1, R(neck + 1), 2, R(D.bry), '#c0392b'); }
+    if (l.acc === 'bow') [-2, -1, 1, 2].forEach(x => G.set(R(cx + x), R(neck + 1), '#e8453c'));
+    if (l.acc === 'scarf') G.rect(R(cx - 4), R(neck), 8, 2, '#ffd23f');
+    if (l.acc === 'flower') [[-3, 2], [2, 3], [0, 5]].forEach(([x, y]) => G.set(R(cx + x), R(neck + y), '#fff6ec'));
+    if (l.kind === 'lion') G.ell(cx, cy, rx + 3, ry + 3, (x, y) => (x + y) % 3 ? f.D : shade(f.D, 25));
+    if (big) { [-1, 1].forEach(s => { G.ell(cx + s * (rx - 1.5), cy - ry + 1.5, 2.3, 2.3, f.O); G.set(R(cx + s * (rx - 1.5)), R(cy - ry + 1.5), '#ff9fb0'); }); }
+    else { G.tri(cx - rx + .5, cy - ry + 3, cx - 1, cy - ry + 1.5, cx - rx + .5, cy - ry - 1.5, f.patch ? f.D : f.O); G.tri(cx + 1, cy - ry + 1.5, cx + rx - .5, cy - ry + 3, cx + rx - .5, cy - ry - 1.5, f.O); }
+    G.ell(cx, cy, rx, ry, f.O);
+    if (l.kind === 'tiger') [[-3, -3], [0, -4], [3, -3], [-5, 0], [5, 0], [-5, 2], [5, 2]].forEach(([x, y]) => { G.set(cx + x, cy + y, f.D); G.set(cx + x, cy + y + 1, f.D); });
+    if (l.kind === 'leopard') [[-3, -3], [2, -4], [4, -1], [-5, 1], [5, 2], [-2, -1]].forEach(([x, y]) => G.set(cx + x, cy + y, f.D));
+    if (f.patch) { G.ell(cx - 2.5, cy - 1.5, 2.4, 2, f.D); if (f.D2) G.ell(cx + 2.5, cy - 2, 2, 1.5, f.D2); }
+    else if (!big && l.kind !== 'white') { G.set(R(cx - rx + 1), R(cy), f.D); G.set(R(cx + rx - 1), R(cy), f.D); }
+    const ex = big ? 3 : l.size === 's' ? 2.5 : 2.2, ey = cy - (big ? 1 : 0);
+    const eyes = l.size === 's' ? [[-3, 0], [-2, 0], [-3, 1], [-2, 1], [2, 0], [3, 0], [2, 1], [3, 1]] : [[-ex, 0], [-ex, 1], [ex, 0], [ex, 1]];
+    eyes.forEach(([x, y]) => G.set(R(cx + x), R(ey + y), f.eye));
+    if (l.size === 's') { G.set(R(cx - 3), R(ey), '#ffffff'); G.set(R(cx + 2), R(ey), '#ffffff'); }
+    G.ell(cx, cy + ry * .55, big ? 3.2 : 2.1, big ? 2 : 1.3, f.W);
+    G.set(R(cx), R(cy + ry * .35), '#ff8a9a');
+  });
 }
-function drawCafeScene(eq) {
-  const wall = eq.wall, floor = eq.floor;
-  // wall
-  const WALL = { wood: ['#e9c58f', '#d9b27a', '#b98a5a'], wave: ['#e4f6ff', '#a8dcf0', '#3a78c8'], sakura: ['#ffe8ef', '#ffb0c8', '#c07090'], night: ['#23285a', '#fff6c0', '#141833'] }[wall];
-  g.fillStyle = WALL[0]; g.fillRect(0, 18, W, 80);
-  if (wall === 'wood') { g.fillStyle = WALL[1]; for (let x = 4; x < W; x += 11) g.fillRect(x, 18, 1, 66); }
-  if (wall === 'wave') { g.fillStyle = WALL[1]; for (let y = 24; y < 84; y += 9) for (let x = 0; x < W; x++) g.fillRect(x, y + R(Math.sin(x * .25) * 1.5), 1, 2); }
-  if (wall === 'sakura') { g.fillStyle = WALL[1]; for (let i = 0; i < 40; i++) { const x = (i * 37) % W, y = 22 + (i * 23) % 60; g.fillRect(x, y, 2, 1); g.fillRect(x, y - 1, 1, 1); } }
-  if (wall === 'night') { for (let i = 0; i < 26; i++) { g.globalAlpha = .4 + .6 * Math.abs(Math.sin(T + i)); g.fillStyle = WALL[1]; g.fillRect((i * 41) % W, 20 + (i * 19) % 62, 1, 1); } g.globalAlpha = 1; }
-  g.fillStyle = WALL[2]; g.fillRect(0, 84, W, 14); g.fillStyle = shade(WALL[2], 30); g.fillRect(0, 84, W, 2); g.fillStyle = OUT; g.fillRect(0, 86, W, 1);
-  for (let x = 6; x < W; x += 16) { g.fillStyle = shade(WALL[2], -20); g.fillRect(x, 88, 1, 10); }
-  // sign board
-  panel(6, 22, 62, 18); txt('渔喵小馆', 37, 31, 9, '#7a3b12', 'center', null);
-  // window with curtains
-  g.fillStyle = OUT; g.fillRect(78, 24, 38, 32);
-  g.fillStyle = '#9ad9ff'; g.fillRect(79, 25, 36, 16); g.fillStyle = '#46bcd0'; g.fillRect(79, 41, 36, 14);
-  g.fillStyle = '#e6fbff'; for (let x = 80; x < 114; x += 6) g.fillRect(x + R(Math.sin(T * 2 + x)), 41, 3, 1);
-  g.fillStyle = '#ffe98a'; g.fillRect(104, 29, 4, 4);
-  g.fillStyle = '#8a5428'; g.fillRect(96, 24, 2, 32); g.fillRect(78, 40, 38, 1);
-  g.fillStyle = '#e05a50'; g.fillRect(76, 22, 6, 36); g.fillRect(112, 22, 6, 36); g.fillStyle = '#b8403a'; g.fillRect(78, 22, 1, 36); g.fillRect(114, 22, 1, 36);
-  g.fillStyle = '#8a5428'; g.fillRect(74, 21, 46, 2);
-  // aquarium
+const guestBody = (l, fr) => art('gb' + l.size + l.kind + l.cloth + l.acc + fr, () => { const c = guestBodySpr(l, fr); return { c, f: flipC(c), cx: { s: 8, m: 9, l: 12 }[l.size] }; });
+
+// ---------- iso drawing helpers (all on the 2x canvas)
+function diamondC(cx, cy, hw, hh, col) {
+  g.fillStyle = col;
+  for (let dy = -hh; dy < hh; dy++) { const k = dy < 0 ? (dy + hh + .5) / hh : (hh - dy - .5) / hh, w = R(hw * k); g.fillRect(R(cx - w), R(cy + dy), w * 2, 1); }
+}
+// a block standing on the tile rectangle [i0,i1)x[j0,j1): bottom `lift` px above the floor plane, `h` tall
+function isoBox(i0, j0, i1, j1, h, top, left, right, lift) {
+  lift = lift || 0;
+  const [x0, y0] = isoPt(i0, j0), [x1, y1] = isoPt(i1, j0), [x2, y2] = isoPt(i1, j1), [x3, y3] = isoPt(i0, j1);
+  const ly = (xa, ya, xb, yb, x) => xb === xa ? ya : ya + (yb - ya) * (x - xa) / (xb - xa);
+  for (let x = Math.ceil(x3); x < x1; x++) {
+    const yt = (x < x0 ? ly(x3, y3, x0, y0, x) : ly(x0, y0, x1, y1, x)) - lift - h, yb = (x < x2 ? ly(x3, y3, x2, y2, x) : ly(x2, y2, x1, y1, x)) - lift;
+    g.fillStyle = top; g.fillRect(x, R(yt), 1, Math.max(1, R(yb - h - yt)));
+    if (h > 0) { g.fillStyle = x < x2 ? left : right; g.fillRect(x, R(yb - h), 1, R(h)); }
+    g.fillStyle = OUT; g.fillRect(x, R(yt) - 1, 1, 1); g.fillRect(x, R(yb), 1, 1);
+  }
+  g.fillStyle = OUT; [x3, x1].forEach(x => { const yy = x === x3 ? y3 : y1; g.fillRect(R(x) - 1, R(yy - lift - h), 1, R(h) + 1); });
+  if (h > 2) { g.fillStyle = shade(left, 25); g.fillRect(R(x2), R(y2 - lift - h), 1, R(h)); }
+}
+const hsh = (a, b) => ((a * 73856093) ^ (b * 19349663)) >>> 0;
+function wallColor(wall, x, rel) {
+  const hw = ISO.wh;
+  if (rel >= hw - 3) return '#fbe8c8';
+  if (rel === hw - 4) return OUT;
+  if (rel < 22) {
+    const base = { wood: '#b98a5a', wave: '#3a78c8', sakura: '#c07090', night: '#141833' }[wall];
+    return rel > 19 ? shade(base, -35) : rel === 19 ? shade(base, 30) : (x % 14 === 0 ? shade(base, -18) : base);
+  }
+  if (wall === 'wood') return x % 11 === 0 ? '#d9b27a' : '#e9c58f';
+  if (wall === 'wave') return (R(rel + Math.sin(x * .22) * 2.5) % 11) < 2 ? '#a8dcf0' : '#e4f6ff';
+  if (wall === 'sakura') return hsh(x, rel) % 41 === 0 ? '#ff9fbf' : '#ffe8ef';
+  return hsh(x, rel) % 70 === 0 ? '#fff6c0' : '#23285a';
+}
+// static layer (sky, sea, pier, floor, walls) cached per wallpaper + floor
+const CAFE_BG = {};
+function cafeBg(wall, floor) {
+  const key = wall + '/' + floor;
+  if (CAFE_BG[key]) return CAFE_BG[key];
+  const c = mk(CW2, CH2), keep = g; g = c.getContext('2d');
+  ['#8fd0ff', '#a4dcff', '#bde6ff', '#d4efff'].forEach((col, i) => { g.fillStyle = col; g.fillRect(0, 36 + i * 16, CW2, 16); });
+  ['#4cc4d2', '#40b4cc', '#36a2c2', '#2d8ebb', '#2679ae', '#20669c'].forEach((col, i) => { g.fillStyle = col; g.fillRect(0, 100 + i * 70, CW2, 70); });
+  g.fillStyle = '#e6fbff'; for (let i = 0; i < 60; i++) g.fillRect((i * 97) % CW2, 104 + (i * 53) % 400, 5 + i % 4, 1);
+  const n = ISO.n;
+  // pier posts, deck, planks
+  for (let k = -2; k <= n + 2; k += 2) { const [px, py] = isoPt(k, n + 3); g.fillStyle = OUT; g.fillRect(R(px) - 3, R(py + 14), 6, 34); g.fillStyle = '#5a3418'; g.fillRect(R(px) - 2, R(py + 14), 4, 34); }
+  isoBox(-2, -1, n + 2, n + 3, 10, '#c49464', '#7a4a28', '#5a3418', -16);
+  for (let j = -1; j < n + 3; j += .5) { const [ax, ay] = isoPt(-2, j), [bx, by] = isoPt(n + 2, j); pline(ax, ay + 6, bx, by + 6, '#a87a4a'); }
+  // room floor
+  isoBox(0, 0, n, n, 6, '#b98a5a', '#8a5428', '#6b3f1f', -6);
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const [cx, cy] = isoC(i, j), h = hsh(i, j);
+    if (floor === 'check') diamondC(cx, cy, 16, 8, (i + j) % 2 ? '#c09060' : '#a87a4a');
+    if (floor === 'tile') { diamondC(cx, cy, 16, 8, '#d0dbe6'); diamondC(cx, cy, 15, 7, (i + j) % 2 ? '#f4f8fc' : '#6fa8e0'); }
+    if (floor === 'tatami') { diamondC(cx, cy, 16, 8, '#b8a868'); diamondC(cx, cy, 14, 7, i % 2 ? '#dccf92' : '#d2c486'); }
+    if (floor === 'shell') { diamondC(cx, cy, 16, 8, '#f4e8e0'); diamondC(cx, cy, 13, 6, ['#bfe8e0', '#ffe9a0', '#ffb0c8', '#d0c8ff'][h % 4]); }
+  }
+  // back walls
+  const wh = ISO.wh, [lx] = isoPt(0, n), [rx] = isoPt(n, 0);
+  for (let x = R(lx); x < R(rx); x++) {
+    const left = x < ISO.ox, yb = left ? ISO.oy + (ISO.ox - x) / 2 : ISO.oy + (x - ISO.ox) / 2;
+    for (let rel = 0; rel < wh; rel++) { let col = wallColor(wall, x, rel); if (left && rel < wh - 4) col = shade(col, -14); g.fillStyle = col; g.fillRect(x, R(yb) - rel - 1, 1, 1); }
+  }
+  g.fillStyle = OUT; g.fillRect(R(lx) - 1, isoPt(0, n)[1] - wh - 1, 1, wh + 1); g.fillRect(R(rx), isoPt(n, 0)[1] - wh - 1, 1, wh + 1);
+  g.fillStyle = shade('#fbe8c8', -30); g.fillRect(ISO.ox, ISO.oy - wh, 1, wh - 4);
+  // window on the right wall
+  const wx = R(isoPt(5.2, 0)[0]);
+  for (let x = wx; x < wx + 42; x++) {
+    const yb = ISO.oy + (x - ISO.ox) / 2, o = x - wx;
+    for (let rel = 40; rel < 84; rel++) {
+      const edge = o === 4 || o === 37 || rel === 44 || rel === 79, inner = o > 4 && o < 37 && rel > 44 && rel < 79;
+      let col = null;
+      if (o < 4 || o > 37) col = o === 0 || o === 41 ? '#8a2a20' : (x % 2 ? '#e05a50' : '#c8463e');
+      else if (edge || o === 21) col = '#8a5428';
+      else if (inner) col = rel > 60 ? (rel > 70 && o > 26 && o < 31 && rel < 75 ? '#ffe98a' : '#9ad9ff') : (hsh(x, rel) % 9 === 0 ? '#e6fbff' : '#46bcd0');
+      if (col) { g.fillStyle = col; g.fillRect(x, R(yb) - rel - 1, 1, 1); }
+    }
+  }
+  // shelf with jars on the left wall above the kitchen
+  const sx0 = R(isoPt(0, 4.4)[0]);
+  for (let x = sx0; x < sx0 + 56; x++) {
+    const yb = ISO.oy + (ISO.ox - x) / 2;
+    g.fillStyle = '#8a5428'; g.fillRect(x, R(yb) - 60, 1, 3); g.fillStyle = OUT; g.fillRect(x, R(yb) - 57, 1, 1);
+    const jar = [[4, '#e8453c'], [16, '#3fae5a'], [28, '#ffc83a'], [40, '#6fa8e0']].map(([o, c]) => [sx0 + o, c]).find(([jx]) => x >= jx && x < jx + 7);
+    if (jar) { const jx = jar[0]; g.fillStyle = x === jx || x === jx + 6 ? OUT : jar[1]; g.fillRect(x, R(yb) - 72, 1, 12); g.fillStyle = OUT; g.fillRect(x, R(yb) - 73, 1, 1); if (x > jx && x < jx + 6) { g.fillStyle = '#fbfbf6'; g.fillRect(x, R(yb) - 72, 1, 3); } }
+  }
+  // outside: barrels and a lamp post on the pier
+  [[-1.2, 5], [-1.2, 6.1], [9.2, 1.2]].forEach(([i, j]) => { const [bx, by] = isoC(i, j); g.fillStyle = OUT; g.fillRect(R(bx) - 7, R(by) - 18, 14, 18); g.fillStyle = '#8a5a30'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 16); g.fillStyle = '#5a3418'; g.fillRect(R(bx) - 6, R(by) - 13, 12, 2); g.fillRect(R(bx) - 6, R(by) - 6, 12, 2); g.fillStyle = '#a8703a'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 2); });
+  g = keep;
+  return (CAFE_BG[key] = c);
+}
+function drawCafeIso(eq) {
+  g.drawImage(cafeBg(eq.wall, eq.floor), 0, 0);
+  // gulls
+  for (let i = 0; i < 2; i++) { const x = ((T * 14 + i * 150) % 340) - 30, y = 60 + i * 18 + Math.sin(T * 2 + i) * 3, w = Math.floor(T * 5 + i) % 2; g.fillStyle = '#ffffff'; g.fillRect(R(x) - 3, R(y) - w, 3, 1); g.fillRect(R(x) + 1, R(y) - w, 3, 1); g.fillRect(R(x), R(y), 1, 1); }
+  // welcome mat
+  diamondC(DOOR[0] - 4, DOOR[1] - 2, 12, 6, '#8a2a20'); diamondC(DOOR[0] - 4, DOOR[1] - 2, 10, 5, '#c0392b');
+  const L = [], n = seatCount(eq);
+  // kitchen: fridge, counter with stove, chef
+  L.push({ y: isoPt(1, 1)[1], f: () => { isoBox(0, 0, 1, 1, 46, '#f4f8fc', '#d0d8e0', '#b8c0cc'); const [fx, fy] = isoPt(1, 1); g.fillStyle = '#8a93a6'; g.fillRect(R(fx) - 12, R(fy) - 36, 1, 10); g.fillRect(R(fx) - 12, R(fy) - 22, 1, 6); } });
+  const chefFace = cafe.chefT > 0 ? 'happy' : blinkT < 0 ? 'blink' : 'normal', [chx, chy] = isoC(0.1, 2.3);
+  L.push({ y: chy, f: () => g.drawImage(chefImg(chefFace, WALLET.eq.fur), R(chx) - 13, R(chy) - 34 + (cafe.svc ? R(Math.abs(Math.sin(T * 6))) : 0)) });
+  L.push({ y: isoPt(2, 4)[1], f: () => {
+    isoBox(1, 1, 2, 4, 18, '#dfe4ea', '#9aa0aa', '#7a808a');
+    const [sx, sy] = isoC(1, 1.6); const top = sy - 18;
+    if (eq.stove === 'copper') { g.fillStyle = OUT; g.fillRect(R(sx) - 7, R(top) - 10, 14, 10); g.fillStyle = '#d9803a'; g.fillRect(R(sx) - 6, R(top) - 9, 12, 8); g.fillStyle = '#f0a860'; g.fillRect(R(sx) - 6, R(top) - 9, 12, 2); }
+    else if (eq.stove === 'master') { g.fillStyle = OUT; g.fillRect(R(sx) - 6, R(top) - 11, 12, 11); g.fillStyle = '#6b3f1f'; g.fillRect(R(sx) - 5, R(top) - 7, 10, 6); g.fillStyle = '#e8eef4'; [-4, -1, 2].forEach(o => g.fillRect(R(sx) + o, R(top) - 12, 2, 6)); }
+    else { diamondC(sx, top - 1, 8, 4, '#3a3a46'); g.fillStyle = OUT; g.fillRect(R(sx) - 6, R(top) - 5, 12, 3); g.fillStyle = '#5a5a66'; g.fillRect(R(sx) - 5, R(top) - 5, 10, 2); g.fillRect(R(sx) + 5, R(top) - 5, 6, 1); }
+    if (cafe.svc) { g.globalAlpha = .6; g.fillStyle = '#ffffff'; for (let i = 0; i < 3; i++) { const u = (T * .8 + i / 3) % 1; g.fillRect(R(sx - 3 + i * 3 + Math.sin(T * 4 + i) * 1.5), R(top - 12 - u * 16), 1, 1); } g.globalAlpha = 1; }
+    const [px, py] = isoC(1, 3.1); g.drawImage(dishImg('clown'), R(px) - 12, R(py) - 18 - 16);
+  } });
+  // aquarium against the right wall
   if (eq.tank !== 'none') {
-    const big = eq.tank === 'big', x0 = big ? 124 : 140, y0 = big ? 26 : 52, tw = big ? 50 : 22, th = big ? 36 : 18;
-    g.fillStyle = '#6b3f1f'; g.fillRect(x0 - 2, y0 + th, tw + 4, 4);
-    g.fillStyle = OUT; g.fillRect(x0 - 1, y0 - 1, tw + 2, th + 2);
-    g.fillStyle = '#5ec8e0'; g.fillRect(x0, y0, tw, th); g.fillStyle = '#8fe0f0'; g.fillRect(x0, y0, tw, 2);
-    g.fillStyle = '#e8d8a0'; g.fillRect(x0, y0 + th - 3, tw, 3);
-    for (let i = 0; i < (big ? 4 : 2); i++) { g.fillStyle = '#3fae5a'; const wx = x0 + 3 + i * (tw / (big ? 4 : 2)); for (let j = 0; j < (big ? 9 : 5); j++) g.fillRect(wx + R(Math.sin(T * 2 + j * .4 + i)), y0 + th - 4 - j, 1, 1); }
-    tankFish().slice(0, big ? 5 : 2).forEach((k, i) => {
-      const S = SPR[k], sc = .5, fw = S.w * sc, fh = S.h * sc, span = tw - fw - 2, u = (T * .18 + i * .37) % 2, dir = u < 1 ? 1 : -1;
-      const fx = x0 + 1 + span * (u < 1 ? u : 2 - u), fy = y0 + 4 + ((i * 7) % Math.max(1, th - fh - 7)) + Math.sin(T * 2 + i) * 1.5;
-      const img = DEX.fish[k].shiny ? (dir > 0 ? S.gr : S.gl) : (dir > 0 ? S.r : S.l);
-      g.drawImage(img, R(fx), R(fy), R(fw), R(fh));
-    });
-    g.fillStyle = '#e8fbff'; for (let i = 0; i < 3; i++) { const u = (T * .5 + i / 3) % 1; g.fillRect(R(x0 + 4 + i * (tw - 8) / 2 + Math.sin(T * 3 + i) ), R(y0 + th - 4 - u * (th - 6)), 1, 1); }
-    g.globalAlpha = .25; g.fillStyle = '#ffffff'; g.fillRect(x0 + 2, y0 + 3, 1, th - 7); g.globalAlpha = 1;
+    const big = eq.tank === 'big';
+    L.push({ y: isoPt(big ? 5 : 5, 1)[1], f: () => {
+      if (big) {
+        isoBox(3, 0, 5, 1, 8, '#8a5428', '#6b3f1f', '#5a3418');
+        isoBox(3, 0, 5, 1, 30, '#8fe0f0', '#5ec8e0', '#46b0d0', 8);
+        const [ax, ay] = isoPt(3, 1), [bx, by] = isoPt(5, 1);
+        for (let x = R(ax) + 1; x < bx; x++) { const yb = ay + (by - ay) * (x - ax) / (bx - ax) - 8; g.fillStyle = '#e8d8a0'; g.fillRect(x, R(yb) - 4, 1, 4); if (x % 7 === 0) { g.fillStyle = '#3fae5a'; for (let k = 0; k < 9; k++) g.fillRect(x + R(Math.sin(T * 2 + k * .5 + x)), R(yb) - 5 - k, 1, 1); } }
+        tankFish().slice(0, 5).forEach((k, i) => {
+          const S = SPR[k], sc = .6, fw = S.w * sc, fh = S.h * sc, u0 = (T * .12 + i * .31) % 2, u = u0 < 1 ? u0 : 2 - u0, dir = u0 < 1 ? 1 : -1;
+          const x = ax + 2 + (bx - ax - 4 - fw) * u, yb = ay + (by - ay) * ((x - ax) / (bx - ax)) - 8, y = yb - 8 - (i * 5) % 18 - fh + Math.sin(T * 2 + i);
+          g.drawImage(DEX.fish[k].shiny ? (dir > 0 ? S.gr : S.gl) : (dir > 0 ? S.r : S.l), R(x), R(y), R(fw), R(fh));
+        });
+        g.globalAlpha = .3; g.fillStyle = '#ffffff'; g.fillRect(R(ax) + 3, R(ay) - 34, 1, 20); g.globalAlpha = 1;
+      } else {
+        isoBox(4, 0, 5, 1, 16, '#a86a32', '#8a5428', '#6b3f1f');
+        const [cx, cy] = isoC(4, .5), by = cy - 16 - 9;
+        disc(cx, by, 10, OUT); disc(cx, by, 9, '#5ec8e0'); g.fillStyle = '#8fe0f0'; g.fillRect(R(cx) - 8, R(by) - 6, 16, 2);
+        tankFish().slice(0, 2).forEach((k, i) => { const S = SPR[k], sc = .4, u = Math.sin(T * .8 + i * 2), dir = Math.cos(T * .8 + i * 2) > 0 ? 1 : -1; g.drawImage(dir > 0 ? S.r : S.l, R(cx - S.w * sc / 2 + u * 4), R(by - 2 + i * 4 - S.h * sc / 2), R(S.w * sc), R(S.h * sc)); });
+      }
+    } });
   }
-  // floor
-  const FL = { check: ['#b98a5a', '#a87a4a'], tile: ['#f4f8fc', '#6fa8e0'], tatami: ['#d8c88a', '#b8a868'], shell: ['#ffd8e0', '#bfe8e0'] }[floor];
-  g.fillStyle = FL[0]; g.fillRect(0, 98, W, 64); g.fillStyle = FL[1];
-  if (floor === 'check' || floor === 'tile') for (let y = 98; y < 162; y += 8) for (let x = ((y - 98) / 8 % 2) * 8; x < W; x += 16) g.fillRect(x, y, 8, 8);
-  if (floor === 'tatami') { for (let y = 98; y < 162; y += 16) g.fillRect(0, y, W, 1); for (let x = 0; x < W; x += 30) g.fillRect(x, 98, 1, 64); }
-  if (floor === 'shell') for (let y = 100; y < 162; y += 5) for (let x = (y % 10) ? 0 : 3; x < W; x += 6) { g.fillStyle = ['#bfe8e0', '#ffe9a0', '#ffb0c8'][(x + y) % 3]; g.fillRect(x, y, 3, 3); }
-  // lamp
-  if (eq.lamp !== 'none') {
-    const lx = 97; g.fillStyle = OUT; g.fillRect(lx, 18, 1, 8);
-    g.globalAlpha = .18 + .04 * Math.sin(T * 3); disc(lx, 34, 16, '#fff2a0'); g.globalAlpha = 1;
-    if (eq.lamp === 'lantern') { g.fillStyle = OUT; g.fillRect(lx - 5, 25, 11, 12); g.fillStyle = '#e8453c'; g.fillRect(lx - 4, 26, 9, 10); g.fillStyle = '#ff8a6a'; g.fillRect(lx - 3, 27, 2, 8); g.fillStyle = '#2a2020'; g.fillRect(lx - 4, 25, 9, 1); g.fillRect(lx - 4, 36, 9, 1); }
-    else { g.fillStyle = OUT; g.fillRect(lx - 8, 25, 17, 7); g.fillStyle = '#ffd0da'; g.fillRect(lx - 7, 26, 15, 5); g.fillStyle = '#ffb0c0'; for (let x = lx - 6; x < lx + 8; x += 3) g.fillRect(x, 26, 1, 5); g.fillStyle = '#fff6c0'; g.fillRect(lx - 2, 31, 5, 2); }
+  // plant in the right corner
+  if (eq.plant !== 'none') {
+    const [px, py] = isoC(7, .3);
+    L.push({ y: py, f: () => {
+      g.fillStyle = OUT; g.fillRect(R(px) - 7, R(py) - 14, 14, 14); g.fillStyle = '#c0703a'; g.fillRect(R(px) - 6, R(py) - 13, 12, 12); g.fillStyle = '#e08a50'; g.fillRect(R(px) - 6, R(py) - 13, 12, 2);
+      if (eq.plant === 'pot') [[-4, -18], [3, -20], [0, -24], [-2, -21], [5, -16]].forEach(([dx, dy]) => { disc(px + dx, py + dy, 4, OUT); disc(px + dx, py + dy, 3, dx % 2 ? '#3fae5a' : '#4fc26a'); });
+      else { g.fillStyle = OUT; g.fillRect(R(px) - 2, R(py) - 70, 5, 58); g.fillStyle = '#8a5a2a'; g.fillRect(R(px) - 1, R(py) - 70, 3, 58); for (let s = 0; s < 6; s++) { const a = -Math.PI / 2 + (s - 2.5) * .55 + Math.sin(T + s) * .04; for (let j = 1; j < 22; j++) { g.fillStyle = j % 3 ? '#3fae5a' : '#2e8a47'; g.fillRect(R(px + Math.cos(a) * j * 1.3), R(py - 70 + Math.sin(a) * j + j * j * .06), 3, 2); } } }
+    } });
   }
-  // kitchen: shelf, chef, stove counter
-  g.fillStyle = '#8a5428'; g.fillRect(4, 50, 50, 3);
-  [['#e8453c', 8], ['#3fae5a', 18], ['#ffc83a', 28], ['#6fa8e0', 40]].forEach(([c, x]) => { g.fillStyle = OUT; g.fillRect(x - 1, 42, 7, 8); g.fillStyle = c; g.fillRect(x, 43, 5, 7); g.fillStyle = '#fbfbf6'; g.fillRect(x, 43, 5, 2); });
-  const chefFace = cafe.chefT > 0 ? 'happy' : blinkT < 0 ? 'blink' : 'normal';
-  g.drawImage(chefImg(chefFace, WALLET.eq.fur), 10, 66 + (cafe.svc ? R(Math.abs(Math.sin(T * 6))) : 0));
-  g.fillStyle = OUT; g.fillRect(0, 99, 58, 44); g.fillStyle = '#8a8f9a'; g.fillRect(0, 100, 57, 42);
-  g.fillStyle = '#b8c0cc'; g.fillRect(0, 100, 57, 3); g.fillStyle = '#6a707a'; g.fillRect(0, 108, 57, 1); g.fillRect(28, 108, 1, 34);
-  g.fillStyle = '#5a6070'; g.fillRect(4, 112, 20, 12); g.fillRect(33, 112, 20, 12);
-  if (eq.stove === 'copper') { g.fillStyle = OUT; g.fillRect(29, 91, 16, 10); g.fillStyle = '#d9803a'; g.fillRect(30, 92, 14, 8); g.fillStyle = '#f0a860'; g.fillRect(30, 92, 14, 2); }
-  else if (eq.stove === 'master') { g.fillStyle = OUT; g.fillRect(34, 88, 12, 13); g.fillStyle = '#6b3f1f'; g.fillRect(35, 92, 10, 8); g.fillStyle = '#e8eef4'; [36, 39, 42].forEach(x => g.fillRect(x, 88, 2, 5)); if (Math.floor(T * 2) % 4 === 0) { g.fillStyle = '#ffffff'; g.fillRect(40, 87, 1, 1); } }
-  else { g.fillStyle = OUT; g.fillRect(30, 97, 18, 4); g.fillStyle = '#3a3a46'; g.fillRect(31, 97, 12, 3); g.fillRect(43, 98, 5, 1); }
-  if (cafe.svc) { g.globalAlpha = .6; g.fillStyle = '#ffffff'; for (let i = 0; i < 3; i++) { const u = (T * .8 + i / 3) % 1; g.fillRect(R(36 + i * 4 + Math.sin(T * 4 + i) * 1.5), R(95 - u * 14), 1, 1); } g.globalAlpha = 1; }
-  // plant
-  if (eq.plant === 'pot') { g.fillStyle = OUT; g.fillRect(60, 117, 10, 11); g.fillStyle = '#c0703a'; g.fillRect(61, 118, 8, 9); [[62, 110], [66, 108], [64, 113]].forEach(([x, y]) => { g.fillStyle = OUT; disc(x, y, 3, OUT); disc(x, y, 2.2, '#3fae5a'); }); }
-  if (eq.plant === 'palm') { g.fillStyle = OUT; g.fillRect(58, 115, 14, 14); g.fillStyle = '#c0703a'; g.fillRect(59, 116, 12, 12); g.fillStyle = '#8a5a2a'; g.fillRect(64, 72, 3, 44); for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + (i - 2) * .6 + Math.sin(T + i) * .05; for (let j = 1; j < 14; j++) { g.fillStyle = j % 3 ? '#3fae5a' : '#2e8a47'; g.fillRect(R(65 + Math.cos(a) * j), R(72 + Math.sin(a) * j + j * j * .05), 2, 2); } } }
-  // guests behind the table, dishes on it
-  const n = seatCount(eq);
-  for (let i = 0; i < n; i++) { const x = seatX(i, n); g.fillStyle = OUT; g.fillRect(x - 7, 120, 14, 5); g.fillStyle = '#c0392b'; g.fillRect(x - 6, 121, 12, 3); g.fillStyle = '#e05a50'; g.fillRect(x - 6, 121, 12, 1); }
+  // tables, chairs, guests
+  for (let k = 0; k < n; k++) {
+    const [cx, cy] = isoC(...TABLES[k]);
+    L.push({ y: cy - 5.2, f: () => { diamondC(cx - 9, cy - 11, 7, 3.5, OUT); diamondC(cx - 9, cy - 12, 6, 3, '#c0392b'); g.fillStyle = OUT; g.fillRect(R(cx) - 16, R(cy) - 26, 2, 16); g.fillStyle = '#8a5428'; g.fillRect(R(cx) - 15, R(cy) - 25, 1, 14); } });
+    L.push({ y: cy + 1, f: () => {
+      g.fillStyle = OUT; g.fillRect(R(cx) + 1, R(cy) - 9, 3, 9); g.fillStyle = '#6b3f1f'; g.fillRect(R(cx) + 2, R(cy) - 9, 1, 8);
+      diamondC(cx + 2, cy - 11, 15, 7.5, OUT); diamondC(cx + 2, cy - 12, 14, 7, '#c98a52'); diamondC(cx + 2, cy - 13, 13, 6, '#d9a06a');
+      const c = cafe.cust.find(q => q.seat === k && q.ph === 'eat');
+      if (c) { g.drawImage(dishImg(c.d.k), R(cx) - 10, R(cy) - 27); if (c.d.prem || DISH[c.d.k].boss) { g.fillStyle = '#fff6c0'; g.fillRect(R(cx + 8 + Math.sin(T * 5) * 2), R(cy) - 28, 1, 1); } }
+    } });
+  }
   for (const c of cafe.cust) {
-    // sit so the chin clears the dish on the table
-    const img = guestImg(c.look), chin = { s: 11, m: 12, l: 16 }[c.look.size];
-    const bob = c.ph === 'eat' ? R(Math.abs(Math.sin(c.t * 7))) : R(Math.abs(Math.sin(c.t * 12)) * 2);
-    g.drawImage(img, R(c.x - img.width / 2), 117 - chin - bob);
+    const sitting = c.ph === 'eat', fr = sitting ? 0 : 1 + Math.floor(c.t * 6) % 2, b = guestBody(c.look, fr), img = (c.face || -1) > 0 ? b.f : b.c;
+    const bob = sitting ? R(Math.abs(Math.sin(c.t * 7))) : 0;
+    L.push({ y: c.y + (sitting ? 0 : .5), f: () => g.drawImage(img, R(c.x) - b.cx, R(c.y) - img.height + (sitting ? -4 : 0) - bob) });
   }
-  g.fillStyle = OUT; g.fillRect(70, 127, W - 70, 17); g.fillStyle = '#a86a32'; g.fillRect(71, 128, W - 71, 15);
-  g.fillStyle = '#c98a52'; g.fillRect(71, 128, W - 71, 4); g.fillStyle = '#8a5428'; for (let x = 76; x < W; x += 13) g.fillRect(x, 134, 6, 1);
-  g.fillStyle = '#6b3f1f'; g.fillRect(74, 143, 3, 18); g.fillRect(W - 6, 143, 3, 18);
-  for (let i = 0; i < n; i++) { const x = seatX(i, n); g.fillStyle = shade('#c98a52', -30); g.fillRect(x - 5, 131, 10, 1); }
-  for (const c of cafe.cust) if (c.ph === 'eat') {
-    const di = dishImg(c.d.k); g.drawImage(di, R(c.x - 12), 116);
-    if (c.d.prem || DISH[c.d.k].boss) { g.fillStyle = '#fff6c0'; g.fillRect(R(c.x + 8 + Math.sin(T * 5) * 2), 115, 1, 1); }
-  }
+  L.sort((a, b) => a.y - b.y).forEach(o => o.f());
+  // wall lamps on both back walls
+  if (eq.lamp !== 'none') [[0, 6.2], [0, .6], [1.6, 0]].forEach(([i, j], k) => {
+    const [px, py] = isoPt(i, j), lx = R(px), ly = R(py) - 78;
+    g.globalAlpha = .16 + .03 * Math.sin(T * 3 + k); disc(lx, ly + 8, 15, '#fff2a0'); g.globalAlpha = 1;
+    g.fillStyle = OUT; g.fillRect(lx - 1, ly - 4, 3, 4);
+    if (eq.lamp === 'lantern') { g.fillStyle = OUT; g.fillRect(lx - 5, ly, 11, 13); g.fillStyle = '#e8453c'; g.fillRect(lx - 4, ly + 1, 9, 11); g.fillStyle = '#ff8a6a'; g.fillRect(lx - 3, ly + 2, 2, 9); g.fillStyle = '#2a2020'; g.fillRect(lx - 4, ly, 9, 1); g.fillRect(lx - 4, ly + 12, 9, 1); }
+    else { g.fillStyle = OUT; g.fillRect(lx - 7, ly, 15, 9); g.fillStyle = '#ffd0da'; g.fillRect(lx - 6, ly + 1, 13, 7); g.fillStyle = '#ffb0c0'; for (let x = lx - 5; x < lx + 7; x += 3) g.fillRect(x, ly + 1, 1, 7); g.fillStyle = '#fff6c0'; g.fillRect(lx - 2, ly + 7, 5, 2); }
+  });
 }
-// ---------- UI
+
+// ---------- menus (normal 180x320 layer)
 const CAFE_TABS = ['营业', '菜谱', '装修'];
-const cafeTab = i => [8 + i * 56, 164, 52, 15];
-const CAFE_BTN = { close: [152, 2, 24, 14], open: [40, 284, 100, 20] };
-const slotChip = i => [7 + i * 24, 186, 23, 14];
-const decoRow = i => [10, 204 + i * 27, 160, 25];
-const decoBtn = i => [118, 209 + i * 27, 48, 15];
-const recipeCell = i => [9 + (i % 6) * 27, 186 + Math.floor(i / 6) * 23, 26, 22];
+const cafeTabBtn = i => [6 + i * 57, 298, 54, 18];
+const CAFE_BTN = { close: [152, 2, 24, 14], open: [40, 262, 100, 20] };
+const slotChip = i => [7 + i * 24, 154, 23, 14];
+const decoRow = i => [10, 172 + i * 27, 160, 25];
+const decoBtn = i => [118, 177 + i * 27, 48, 15];
+const recipeCell = i => [9 + (i % 6) * 27, 154 + Math.floor(i / 6) * 23, 26, 22];
 function cafePress(p) {
   if (cafe.detail) { cafe.detail = null; SFX.click(); return; }
   if (inR(p, CAFE_BTN.close)) { go(cafe.back); st = 2; SFX.click(); return; }
-  for (let i = 0; i < 3; i++) if (inR(p, cafeTab(i))) { cafe.tab = i; cafe.prev = null; SFX.click(); return; }
-  if (cafe.tab === 0 && inR(p, CAFE_BTN.open) && !cafe.svc) {
-    if (totalStock() > 0) { cafe.svc = true; cafe.spawnT = 0; cafe.earned = 0; SFX.click(); }
-    else { pop('冰箱是空的 去钓鱼吧', 90, 270, '#ff8a7a', 9, 1.2); SFX.fail(); }
+  for (let i = 0; i < 3; i++) if (inR(p, cafeTabBtn(i))) { cafe.sheet = cafe.sheet === i ? null : i; cafe.prev = null; SFX.click(); return; }
+  if (cafe.sheet === null) return;
+  if (p.y < 150) { cafe.sheet = null; cafe.prev = null; return; }
+  if (cafe.sheet === 0 && inR(p, CAFE_BTN.open) && !cafe.svc) {
+    if (totalStock() > 0) { cafe.svc = true; cafe.spawnT = 0; cafe.earned = 0; cafe.sheet = null; SFX.click(); }
+    else { pop('冰箱是空的 去钓鱼吧', 90, 240, '#ff8a7a', 9, 1.2); SFX.fail(); }
     return;
   }
-  if (cafe.tab === 1) DISH_KEYS.forEach((k, i) => { if (inR(p, recipeCell(i)) && CAFE.known[k]) { cafe.detail = k; SFX.click(); } });
-  if (cafe.tab === 2) {
+  if (cafe.sheet === 1) DISH_KEYS.forEach((k, i) => { if (inR(p, recipeCell(i)) && CAFE.known[k]) { cafe.detail = k; SFX.click(); } });
+  if (cafe.sheet === 2) {
     for (let i = 0; i < DECO_SLOTS.length; i++) if (inR(p, slotChip(i))) { cafe.slot = i; cafe.prev = null; SFX.click(); return; }
     const slot = DECO_SLOTS[cafe.slot];
     DECO[slot].items.forEach((it, i) => {
@@ -973,8 +1118,8 @@ function cafePress(p) {
         cafe.prev = null;
         if (CAFE.deco.eq[slot] === it.id) return;
         if (!decoOwns(slot, it.id)) {
-          if (WALLET.coins < it.price) { pop('金币不足', 140, 204 + i * 27, '#ff8a7a', 9, .9); SFX.fail(); return; }
-          WALLET.coins -= it.price; saveWallet(); CAFE.deco.owned[slot].push(it.id); SFX.buff(); pop('装好了!', 110, 60, '#ffe14a', 11, 1);
+          if (WALLET.coins < it.price) { pop('金币不足', 140, 172 + i * 27, '#ff8a7a', 9, .9); SFX.fail(); return; }
+          WALLET.coins -= it.price; saveWallet(); CAFE.deco.owned[slot].push(it.id); SFX.buff(); pop('装好了!', 90, 60, '#ffe14a', 11, 1);
         } else SFX.click();
         CAFE.deco.eq[slot] = it.id; saveCafe(); return;
       }
@@ -982,41 +1127,51 @@ function cafePress(p) {
     });
   }
 }
-function drawCafe() {
-  const eq = Object.assign({}, CAFE.deco.eq); if (cafe.prev) eq[cafe.prev.slot] = cafe.prev.id;
-  drawCafeScene(eq);
-  // top bar
+function cafeEq() { const eq = Object.assign({}, CAFE.deco.eq); if (cafe.prev) eq[cafe.prev.slot] = cafe.prev.id; return eq; }
+function drawCafe() { drawCafeUI(cafeEq()); }
+function drawCafeUI(eq) {
+  // status bar + shop name plate
   g.fillStyle = '#2a1e14'; g.fillRect(0, 0, W, 18); g.fillStyle = '#4a3424'; g.fillRect(0, 17, W, 1);
   g.drawImage(I.coin, 3, 4); txt(String(WALLET.coins), 14, 9, 8, '#ffe14a', 'left');
   g.drawImage(I.heart, 58, 4); txt(String(CAFE.pop), 69, 9, 8, '#ffd0da', 'left');
   g.drawImage(I.star, 92, 5); txt('魅力 ' + charm(eq), 100, 9, 8, '#fff6c0', 'left');
   button(CAFE_BTN.close, '×');
+  panel(4, 21, 60, 16); txt('渔喵小馆', 34, 29, 8, '#7a3b12', 'center', null);
+  if (cafe.svc) { panel(118, 21, 58, 16); txt('营业中 +' + cafe.earned, 147, 29, 7, '#7a3b12', 'center', null); }
+  // bottom bar
+  g.fillStyle = '#2a1e14'; g.fillRect(0, 294, W, 26); g.fillStyle = '#4a3424'; g.fillRect(0, 294, W, 1);
   CAFE_TABS.forEach((name, i) => {
-    const r = cafeTab(i);
-    if (i === cafe.tab) { g.fillStyle = OUT; g.fillRect(r[0], r[1], r[2], r[3]); g.fillStyle = '#8a4a2a'; g.fillRect(r[0] + 1, r[1] + 1, r[2] - 2, r[3] - 2); txt(name, r[0] + r[2] / 2, r[1] + 7, 8, '#ffe14a', 'center', OUT); }
+    const r = cafeTabBtn(i);
+    if (i === cafe.sheet) { g.fillStyle = OUT; g.fillRect(...r); g.fillStyle = '#8a4a2a'; g.fillRect(r[0] + 1, r[1] + 1, r[2] - 2, r[3] - 2); txt(name, r[0] + r[2] / 2, r[1] + 8, 9, '#ffe14a', 'center', OUT); }
     else button(r, name);
   });
-  panel(4, 182, 172, 134);
+  if (i0Dot()) { g.fillStyle = OUT; g.fillRect(54, 295, 7, 7); g.fillStyle = '#e8453c'; g.fillRect(55, 296, 5, 5); }
+  if (cafe.sheet !== null) drawCafeSheet(eq);
+  if (cafe.detail) drawDishDetail(cafe.detail);
+}
+const i0Dot = () => !cafe.svc && cafe.sheet !== 0 && totalStock() > 0;
+function drawCafeSheet(eq) {
+  panel(4, 150, 172, 142);
   const dark = '#4a2c17';
-  if (cafe.tab === 0) {
+  if (cafe.sheet === 0) {
     const stock = DISH_KEYS.filter(k => stockOf(k) > 0);
-    if (!stock.length) txt('冰箱空空的, 去钓些鱼回来吧', 90, 230, 8, '#8a6a4a', 'center', null);
+    if (!stock.length) txt('冰箱空空的, 去钓些鱼回来吧', 90, 200, 8, '#8a6a4a', 'center', null);
     stock.slice(0, 15).forEach((k, i) => {
-      const x = 10 + (i % 5) * 32, y = 188 + Math.floor(i / 5) * 30;
+      const x = 10 + (i % 5) * 32, y = 156 + Math.floor(i / 5) * 30;
       g.fillStyle = '#ecd49c'; g.fillRect(x, y, 30, 28);
       g.drawImage(dishImg(k), x + 3, y + 1);
       txt('×' + stockOf(k), x + 29, y + 23, 7, dark, 'right', null);
     });
-    if (stock.length > 15) txt('还有 ' + (stock.length - 15) + ' 种…', 150, 276, 7, '#8a6a4a', 'right', null);
-    if (cafe.svc) { g.fillStyle = '#8a7a60'; g.fillRect(...CAFE_BTN.open); txt('营业中  +' + cafe.earned, 90, 294, 9, '#f6e3b4', 'center', null); }
+    if (stock.length > 15) txt('还有 ' + (stock.length - 15) + ' 种…', 166, 251, 7, '#8a6a4a', 'right', null);
+    if (cafe.svc) { g.fillStyle = '#8a7a60'; g.fillRect(...CAFE_BTN.open); txt('营业中  +' + cafe.earned, 90, 272, 9, '#f6e3b4', 'center', null); }
     else button(CAFE_BTN.open, '开始营业');
-  } else if (cafe.tab === 1) {
+  } else if (cafe.sheet === 1) {
     DISH_KEYS.forEach((k, i) => {
       const [x, y, w, h] = recipeCell(i), known = CAFE.known[k];
       g.fillStyle = DISH[k].boss ? '#e8c0a0' : '#ecd49c'; g.fillRect(x, y, w, h);
       g.drawImage(known ? dishImg(k) : dishSil(k), x + 1, y + 2);
     });
-    txt('菜谱 ' + DISH_KEYS.filter(k => CAFE.known[k]).length + ' / ' + DISH_KEYS.length, 90, 309, 7, '#8a6a4a', 'center', null);
+    txt('菜谱 ' + DISH_KEYS.filter(k => CAFE.known[k]).length + ' / ' + DISH_KEYS.length + '   点菜看详情', 90, 281, 7, '#8a6a4a', 'center', null);
   } else {
     DECO_SLOTS.forEach((s, i) => {
       const r = slotChip(i);
@@ -1034,21 +1189,39 @@ function drawCafe() {
       else { button(b, ''); if (WALLET.coins < it.price) { g.globalAlpha = .45; g.fillStyle = '#3a2c40'; g.fillRect(...b); g.globalAlpha = 1; } g.drawImage(I.coin, b[0] + 3, b[1] + 3); txt(String(it.price), b[0] + 13, b[1] + 7, 8, '#ffffff', 'left', OUT); }
     });
   }
-  if (cafe.detail) {
-    const k = cafe.detail, d = DISH[k];
-    TQ.length = 0; // labels underneath would show through the dimmed overlay
-    g.globalAlpha = .6; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
-    panel(14, 70, 152, 170);
-    g.save(); g.beginPath(); g.rect(18, 74, 144, 162); g.clip(); g.globalAlpha = .4; g.fillStyle = '#ffe9a0';
-    for (let i = 0; i < 10; i++) { const a = T * .5 + i * Math.PI / 5; g.beginPath(); g.moveTo(90, 132); g.lineTo(90 + Math.cos(a - .13) * 90, 132 + Math.sin(a - .13) * 90); g.lineTo(90 + Math.cos(a + .13) * 90, 132 + Math.sin(a + .13) * 90); g.fill(); }
-    g.restore(); g.globalAlpha = 1;
-    g.drawImage(dishImg(k), 42, 100, 96, 72);
-    txt(d.name, 90, 86, 12, dark, 'center', null);
-    g.drawImage(I.coin, 58, 180); txt('售价 ' + d.price, 70, 185, 9, '#9a6a00', 'left', null);
-    txt('原料：' + dishSource(k), 90, 200, 8, '#7a3b12', 'center', null);
-    txt('已卖出 ' + (CAFE.sold[k] || 0) + ' 份', 90, 214, 8, '#8a6a4a', 'center', null);
-    txt('点击关闭', 90, 250, 8, '#ffffff');
+}
+function drawDishDetail(k) {
+  const d = DISH[k], dark = '#4a2c17';
+  TQ.length = 0; // labels underneath would show through the dimmed overlay
+  g.globalAlpha = .6; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+  panel(14, 70, 152, 170);
+  g.save(); g.beginPath(); g.rect(18, 74, 144, 162); g.clip(); g.globalAlpha = .4; g.fillStyle = '#ffe9a0';
+  for (let i = 0; i < 10; i++) { const a = T * .5 + i * Math.PI / 5; g.beginPath(); g.moveTo(90, 132); g.lineTo(90 + Math.cos(a - .13) * 90, 132 + Math.sin(a - .13) * 90); g.lineTo(90 + Math.cos(a + .13) * 90, 132 + Math.sin(a + .13) * 90); g.fill(); }
+  g.restore(); g.globalAlpha = 1;
+  g.drawImage(dishImg(k), 42, 100, 96, 72);
+  txt(d.name, 90, 86, 12, dark, 'center', null);
+  g.drawImage(I.coin, 58, 180); txt('售价 ' + d.price, 70, 185, 9, '#9a6a00', 'left', null);
+  txt('原料：' + dishSource(k), 90, 200, 8, '#7a3b12', 'center', null);
+  txt('已卖出 ' + (CAFE.sold[k] || 0) + ' 份', 90, 214, 8, '#8a6a4a', 'center', null);
+  txt('点击关闭', 90, 250, 8, '#ffffff');
+}
+// café frame: iso scene at 2x, then the menu layer on top
+function renderCafe() {
+  TQ.length = 0;
+  const eq = cafeEq(), keep = g;
+  g = CG; CG.imageSmoothingEnabled = false; CG.globalAlpha = 1; drawCafeIso(eq); g = keep;
+  g.clearRect(0, 0, W, H); g.imageSmoothingEnabled = false; g.globalAlpha = 1;
+  drawCafeUI(eq);
+  if (!cafe.detail) for (const p of POPS) txt(p.s, p.x, p.y, p.size, p.col, 'center', OUT, Math.min(1, p.life / p.max * 2));
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.imageSmoothingEnabled = false; ctx.globalAlpha = 1;
+  ctx.fillStyle = '#0b1020'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(cafeCanvas, 0, 0, CW2, CH2, 0, 0, W * K, H * K);
+  ctx.drawImage(low, 0, 0, W, H, 0, 0, W * K, H * K);
+  for (const t of TQ) {
+    const c = textSprite(t), tw = c.w - 2 * c.pad;
+    ctx.globalAlpha = t.alpha; ctx.drawImage(c.cv, R(t.x * K - c.pad - (t.align === 'center' ? tw / 2 : t.align === 'right' ? tw : 0)), R(t.y * K - c.h / 2));
   }
+  ctx.globalAlpha = 1;
 }
 
 // ============================================================ audio + haptics
@@ -1382,7 +1555,8 @@ function useShield(A) {
 
 // ============================================================ input
 const wrap = document.getElementById('wrap'), cv = document.getElementById('c'), ctx = cv.getContext('2d');
-const low = mk(W, H), g = low.getContext('2d');
+const low = mk(W, H);
+let g = low.getContext('2d'); // drawing target; the café swaps in its 2x canvas
 let K = 1;
 function fit() {
   const r = wrap.getBoundingClientRect(), cs = getComputedStyle(wrap);
@@ -2298,6 +2472,7 @@ function drawDex() {
 
 // ============================================================ render
 function render() {
+  if (state === 'cafe') { renderCafe(); return; }
   TQ.length = 0;
   const z = Z();
   g.imageSmoothingEnabled = false; g.globalAlpha = 1;
