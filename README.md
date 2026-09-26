@@ -1,5 +1,7 @@
 # 渔喵传说 Fishy Tails
 
+![渔喵传说 Fishy Tails](cover.png)
+
 竖屏像素风钓鱼小游戏：一只戴渔夫帽的猫，从阳光浅滩一路钓到无光深渊，最后和海怪克拉肯拔河。
 
 **在线试玩：** https://grrreymane.github.io/FishyTails/
