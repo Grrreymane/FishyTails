@@ -1474,15 +1474,35 @@ function render() {
   ctx.fillStyle = '#0b1020'; ctx.fillRect(0, 0, cv.width, cv.height);
   const sx = shake > 0 ? R((Math.random() - .5) * shake * 2) : 0, sy = shake > 0 ? R((Math.random() - .5) * shake * 2) : 0;
   ctx.drawImage(low, 0, 0, W, H, sx * K, sy * K, W * K, H * K);
-  ctx.setTransform(K, 0, 0, K, sx * K, sy * K);
-  ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
   for (const t of TQ) {
-    ctx.globalAlpha = t.alpha; ctx.font = t.size + 'px ' + FONT; ctx.textAlign = t.align;
-    if (t.stroke) { ctx.lineWidth = Math.max(1.5, t.size * .28); ctx.strokeStyle = t.stroke; ctx.strokeText(t.s, t.x, t.y); }
-    ctx.fillStyle = t.col; ctx.fillText(t.s, t.x, t.y);
+    const c = textSprite(t), tw = c.w - 2 * c.pad;
+    const dx = t.x * K - c.pad - (t.align === 'center' ? tw / 2 : t.align === 'right' ? tw : 0);
+    ctx.globalAlpha = t.alpha; ctx.drawImage(c.cv, R(dx + sx * K), R(t.y * K - c.h / 2 + sy * K));
   }
   ctx.globalAlpha = 1;
 }
+// Outlined text, rendered once per (text, size, colours, scale) and reused. The outline is the glyphs
+// stamped around a circle rather than strokeText, so it always hugs the fill with no hairline gap.
+const TXC = new Map();
+function textSprite(t) {
+  const key = t.s + '|' + t.size + '|' + t.col + '|' + t.stroke + '|' + K;
+  let c = TXC.get(key); if (c) return c;
+  if (TXC.size > 400) TXC.clear();
+  const m = document.createElement('canvas'), x = m.getContext('2d'), font = t.size * K + 'px ' + FONT;
+  const r = t.stroke ? Math.max(.75, t.size * .14) * K : 0, pad = Math.ceil(r) + 2;
+  x.font = font;
+  m.width = Math.ceil(x.measureText(t.s).width) + pad * 2; m.height = Math.ceil(t.size * K * 1.5) + pad * 2;
+  x.font = font; x.textBaseline = 'middle'; x.textAlign = 'left';
+  const oy = m.height / 2;
+  if (t.stroke) {
+    x.fillStyle = t.stroke;
+    for (const f of [1, .55]) for (let k = 0; k < 16; k++) { const a = k / 16 * Math.PI * 2; x.fillText(t.s, pad + Math.cos(a) * r * f, oy + Math.sin(a) * r * f); }
+  }
+  x.fillStyle = t.col; x.fillText(t.s, pad, oy);
+  c = { cv: m, w: m.width, h: m.height, pad }; TXC.set(key, c); return c;
+}
+// glyphs rendered before the web font arrived must be redrawn with it
+try { if (document.fonts) { document.fonts.addEventListener('loadingdone', () => TXC.clear()); document.fonts.ready.then(() => TXC.clear()); } } catch (e) {}
 
 // ============================================================ boot
 const ALLTEXT = [...new Set((SCRIPT_TEXT.match(/[^\x00-\x7f]/g) || []))].join('') + 'NEW!?0123456789+×/';
