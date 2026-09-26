@@ -79,15 +79,46 @@ class Grid {
       if (!this.get(x, y) && (this.get(x - 1, y) || this.get(x + 1, y) || this.get(x, y - 1) || this.get(x, y + 1))) add.push([x, y]);
     add.forEach(([x, y]) => this.set(x, y, col));
   }
+  // Soft volume: light from the top-left. Only pixels that belong to a region (share a colour with a
+  // neighbour) are touched, so 1px details like eyes and noses keep their exact colour.
+  autoShade() {
+    const src = this.d.slice(), at = (x, y) => (x < 0 || y < 0 || x >= this.w || y >= this.h) ? null : src[y * this.w + x];
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
+      const c = at(x, y); if (!c || c === OUT) continue;
+      const u = at(x, y - 1), d = at(x, y + 1), l = at(x - 1, y), r = at(x + 1, y);
+      if (u !== c && d !== c && l !== c && r !== c) continue;
+      if (!u || (!l && u !== c)) this.d[y * this.w + x] = shade(c, 22);
+      else if (!d || !r) this.d[y * this.w + x] = shade(c, -24);
+    }
+  }
+  // Coloured outline: each outline pixel is a dark version of the colour it wraps (darker below than above).
+  selOutline() {
+    const add = [];
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
+      if (this.get(x, y)) continue;
+      const below = this.get(x, y + 1), n = below || this.get(x - 1, y) || this.get(x + 1, y) || this.get(x, y - 1);
+      if (n) add.push([x, y, mixHex(n, OUT, below ? .55 : .75)]);
+    }
+    add.forEach(([x, y, c]) => this.set(x, y, c));
+  }
   canvas() {
     const c = mk(this.w, this.h), x = c.getContext('2d');
     for (let j = 0; j < this.h; j++) for (let i = 0; i < this.w; i++) { const col = this.d[j * this.w + i]; if (col) { x.fillStyle = col; x.fillRect(i, j, 1, 1); } }
     return c;
   }
 }
-function paint(w, h, fn, outline = true) { const G = new Grid(w, h); fn(G); if (outline) G.outline(); return G.canvas(); }
+// outline: true = shaded sprite with coloured outline, 'plain' = flat dark outline (icons), false = none
+function paint(w, h, fn, outline = true) {
+  const G = new Grid(w, h); fn(G);
+  if (outline === 'plain') G.outline(); else if (outline) { G.autoShade(); G.selOutline(); }
+  return G.canvas();
+}
+function mixHex(a, b, t) {
+  const p = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)], A = p(a), B = p(b);
+  return '#' + A.map((v, i) => R(v + (B[i] - v) * t).toString(16).padStart(2, '0')).join('');
+}
 function rows(rs, pal, outline = true) {
-  return paint(rs[0].length + 2, rs.length + 2, G => rs.forEach((r, y) => [...r].forEach((ch, x) => { if (pal[ch]) G.set(x + 1, y + 1, pal[ch]); })), outline);
+  return paint(rs[0].length + 2, rs.length + 2, G => rs.forEach((r, y) => [...r].forEach((ch, x) => { if (pal[ch]) G.set(x + 1, y + 1, pal[ch]); })), outline && 'plain');
 }
 function flipC(c) { const o = mk(c.width, c.height), x = o.getContext('2d'); x.translate(c.width, 0); x.scale(-1, 1); x.drawImage(c, 0, 0); return o; }
 function tintC(c, col, a) {
@@ -755,14 +786,14 @@ function newGuestLook() {
 const guestImg = l => art('guest' + l.size + l.kind + l.cloth + l.acc, () => guestSpr(l.size, l.kind, l.cloth, l.acc));
 
 // ---------- chef cat: standing behind the stove in a toque and whites, spatula raised
-function chefSpr(face, furId) {
+function chefSpr(face, furId, frame) {
   const f = FUR[furId] || FUR.orange;
   return paint(26, 34, G => {
     G.rect(7, 19, 12, 15, '#f4f4f4'); G.rect(7, 19, 1, 15, '#d8dde6');
     [[11, 22], [11, 26], [15, 22], [15, 26]].forEach(([x, y]) => G.set(x, y, '#b8c4d0'));
     G.rect(4, 21, 3, 7, '#f4f4f4'); G.rect(4, 28, 3, 2, f.W);
-    G.rect(19, 15, 3, 7, '#f4f4f4'); G.rect(19, 13, 3, 2, f.W);
-    G.rect(20, 5, 1, 8, '#8a5428'); G.rect(18, 2, 5, 3, '#c0c8d0'); G.rect(18, 2, 5, 1, '#e8eef4');
+    if (frame) { G.rect(19, 19, 3, 6, '#f4f4f4'); G.rect(19, 25, 3, 2, f.W); G.rect(21, 26, 4, 1, '#8a5428'); G.rect(22, 23, 3, 3, '#c0c8d0'); }
+    else { G.rect(19, 15, 3, 7, '#f4f4f4'); G.rect(19, 13, 3, 2, f.W); G.rect(20, 5, 1, 8, '#8a5428'); G.rect(18, 2, 5, 3, '#c0c8d0'); G.rect(18, 2, 5, 1, '#e8eef4'); }
     G.tri(6, 10.5, 9, 9.5, 5.5, 6.5, f.patch ? f.D : f.O); G.tri(17, 9.5, 20, 10.5, 20.5, 6.5, f.O);
     G.ell(13, 13.5, 6, 4.8, f.O);
     if (f.patch) { G.ell(10.5, 12, 2.4, 2, f.D); if (f.D2) G.ell(15.5, 11.5, 2, 1.5, f.D2); } else { G.set(8, 13, f.D); G.set(8, 14, f.D); G.set(18, 13, f.D); }
@@ -773,7 +804,7 @@ function chefSpr(face, furId) {
     G.ell(13, 4, 5.5, 3.6, '#ffffff'); G.rect(8, 5, 10, 4, '#f4f4f4'); G.rect(8, 8, 10, 1, '#dfe4ea');
   });
 }
-const chefImg = (face, fur) => art('chef' + face + fur, () => chefSpr(face, fur));
+const chefImg = (face, fur, fr) => art('chef' + face + fur + (fr || 0), () => chefSpr(face, fur, fr || 0));
 
 // ---------- furniture
 const DECO = {
@@ -860,13 +891,13 @@ function updCafe(dt) {
     }
   }
   for (let i = cafe.cust.length - 1; i >= 0; i--) {
-    const c = cafe.cust[i]; c.t += dt;
+    const c = cafe.cust[i]; c.t += dt; if (c.heart > 0) c.heart -= dt;
     if (c.ph === 'eat') {
       if (c.t > (c.look.size === 'l' ? 1.8 : 1.3)) {
         const mult = decoItem('stove', CAFE.deco.eq.stove).mult * (c.look.size === 'l' ? 1.3 : 1);
         const v = R(c.d.price * mult); earn(v); cafe.earned += v;
         pop('+' + v, c.x * CS, c.y * CS - 22, '#ffe14a', 9, .9); SFX.coin();
-        c.ph = 'out'; c.path = [DOOR, OUTSIDE];
+        c.ph = 'out'; c.path = [DOOR, OUTSIDE]; c.heart = 1;
       }
       continue;
     }
@@ -935,11 +966,21 @@ function isoBox(i0, j0, i1, j1, h, top, left, right, lift) {
     const yt = (x < x0 ? ly(x3, y3, x0, y0, x) : ly(x0, y0, x1, y1, x)) - lift - h, yb = (x < x2 ? ly(x3, y3, x2, y2, x) : ly(x2, y2, x1, y1, x)) - lift;
     g.fillStyle = top; g.fillRect(x, R(yt), 1, Math.max(1, R(yb - h - yt)));
     if (h > 0) { g.fillStyle = x < x2 ? left : right; g.fillRect(x, R(yb - h), 1, R(h)); }
-    g.fillStyle = OUT; g.fillRect(x, R(yt) - 1, 1, 1); g.fillRect(x, R(yb), 1, 1);
+    g.fillStyle = mixHex(top, OUT, .6); g.fillRect(x, R(yt) - 1, 1, 1); g.fillStyle = shade(top, 16); g.fillRect(x, R(yt), 1, 1);
+    g.fillStyle = mixHex(h > 0 ? (x < x2 ? left : right) : top, OUT, .7); g.fillRect(x, R(yb), 1, 1);
   }
-  g.fillStyle = OUT; [x3, x1].forEach(x => { const yy = x === x3 ? y3 : y1; g.fillRect(R(x) - 1, R(yy - lift - h), 1, R(h) + 1); });
+  [x3, x1].forEach(x => { const yy = x === x3 ? y3 : y1; g.fillStyle = mixHex(x === x3 ? left : right, OUT, .65); g.fillRect(R(x) - 1, R(yy - lift - h), 1, R(h) + 1); });
   if (h > 2) { g.fillStyle = shade(left, 25); g.fillRect(R(x2), R(y2 - lift - h), 1, R(h)); }
 }
+function softShadow(x, y, hw) { g.globalAlpha = .2; diamondC(x, y, R(hw), Math.max(1, R(hw / 2)), '#2a1a10'); g.globalAlpha = 1; }
+const napCat = () => art('napcat', () => paint(24, 16, G => {
+  G.ell(12, 12, 11, 3.5, '#c0392b'); G.ell(12, 11, 10, 2.8, '#e05a50');
+  G.ell(12, 8.5, 7, 4, '#f5a04a'); G.ell(17, 7.5, 3.5, 3, '#f5a04a');
+  G.tri(15, 5.5, 17, 5, 15.5, 2.5, '#f5a04a'); G.tri(18, 5, 20, 5.5, 19.5, 2.5, '#f5a04a');
+  G.set(16, 8, OUT); G.set(17, 8, OUT); G.set(19, 8, OUT);
+  for (let k = 0; k < 6; k++) G.set(5 + k, 11 - (k > 3 ? 1 : 0), k % 2 ? '#d97a2a' : '#f5a04a');
+  G.set(10, 6, '#d97a2a'); G.set(12, 6, '#d97a2a'); G.set(8, 7, '#d97a2a');
+}));
 const hsh = (a, b) => ((a * 73856093) ^ (b * 19349663)) >>> 0;
 function wallColor(wall, x, rel) {
   const hw = ISO.wh;
@@ -972,16 +1013,25 @@ function cafeBg(wall, floor) {
   isoBox(0, 0, n, n, 6, '#b98a5a', '#8a5428', '#6b3f1f', -6);
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
     const [cx, cy] = isoC(i, j), h = hsh(i, j);
-    if (floor === 'check') diamondC(cx, cy, 16, 8, (i + j) % 2 ? '#c09060' : '#a87a4a');
+    if (floor === 'check') { const fc = (i + j) % 2 ? '#c09060' : '#a87a4a'; diamondC(cx, cy, 16, 8, fc); diamondC(cx, cy - 2, 10, 4, shade(fc, 8)); }
     if (floor === 'tile') { diamondC(cx, cy, 16, 8, '#d0dbe6'); diamondC(cx, cy, 15, 7, (i + j) % 2 ? '#f4f8fc' : '#6fa8e0'); }
     if (floor === 'tatami') { diamondC(cx, cy, 16, 8, '#b8a868'); diamondC(cx, cy, 14, 7, i % 2 ? '#dccf92' : '#d2c486'); }
     if (floor === 'shell') { diamondC(cx, cy, 16, 8, '#f4e8e0'); diamondC(cx, cy, 13, 6, ['#bfe8e0', '#ffe9a0', '#ffb0c8', '#d0c8ff'][h % 4]); }
   }
+  isoBox(2.6, 2.4, 7.4, 6.2, 0, '#b8403a', '#b8403a', '#b8403a'); isoBox(2.9, 2.7, 7.1, 5.9, 0, '#e8b050', '#e8b050', '#e8b050'); isoBox(3.1, 2.9, 6.9, 5.7, 0, '#c8483e', '#c8483e', '#c8483e');
+  g.globalAlpha = .22; g.fillStyle = '#2a1a10';
+  for (let x = R(isoPt(0, n)[0]); x < R(isoPt(n, 0)[0]); x++) { const yb = x < ISO.ox ? ISO.oy + (ISO.ox - x) / 2 : ISO.oy + (x - ISO.ox) / 2; g.fillRect(x, R(yb), 1, 3); }
+  g.globalAlpha = 1;
   // back walls
   const wh = ISO.wh, [lx] = isoPt(0, n), [rx] = isoPt(n, 0);
   for (let x = R(lx); x < R(rx); x++) {
     const left = x < ISO.ox, yb = left ? ISO.oy + (ISO.ox - x) / 2 : ISO.oy + (x - ISO.ox) / 2;
-    for (let rel = 0; rel < wh; rel++) { let col = wallColor(wall, x, rel); if (left && rel < wh - 4) col = shade(col, -14); g.fillStyle = col; g.fillRect(x, R(yb) - rel - 1, 1, 1); }
+    const dc = Math.abs(x - ISO.ox);
+    for (let rel = 0; rel < wh; rel++) {
+      let col = wallColor(wall, x, rel); if (left && rel < wh - 4) col = shade(col, -14);
+      if (rel < 6) col = shade(col, -(6 - rel) * 5); if (dc < 6 && rel < wh - 4) col = shade(col, -(6 - dc) * 4);
+      g.fillStyle = col; g.fillRect(x, R(yb) - rel - 1, 1, 1);
+    }
   }
   g.fillStyle = OUT; g.fillRect(R(lx) - 1, isoPt(0, n)[1] - wh - 1, 1, wh + 1); g.fillRect(R(rx), isoPt(n, 0)[1] - wh - 1, 1, wh + 1);
   g.fillStyle = shade('#fbe8c8', -30); g.fillRect(ISO.ox, ISO.oy - wh, 1, wh - 4);
@@ -1006,6 +1056,33 @@ function cafeBg(wall, floor) {
     const jar = [[4, '#e8453c'], [16, '#3fae5a'], [28, '#ffc83a'], [40, '#6fa8e0']].map(([o, c]) => [sx0 + o, c]).find(([jx]) => x >= jx && x < jx + 7);
     if (jar) { const jx = jar[0]; g.fillStyle = x === jx || x === jx + 6 ? OUT : jar[1]; g.fillRect(x, R(yb) - 72, 1, 12); g.fillStyle = OUT; g.fillRect(x, R(yb) - 73, 1, 1); if (x > jx && x < jx + 6) { g.fillStyle = '#fbfbf6'; g.fillRect(x, R(yb) - 72, 1, 3); } }
   }
+  // framed fish poster and a clock on the left wall
+  const px0 = R(isoPt(0, 6.9)[0]);
+  for (let o = 0; o < 24; o++) {
+    const x = px0 + o, yb = ISO.oy + (ISO.ox - x) / 2;
+    for (let v = 0; v < 26; v++) {
+      const frame = o === 0 || o === 23 || v === 0 || v === 25, dx = (o - 13) / 6, dy = (v - 13) / 4.2;
+      let col = frame ? '#6b3f1f' : (o === 1 || o === 22 || v === 1 || v === 24) ? '#c98a52' : v < 9 ? '#bfe8ff' : '#8fd0e8';
+      if (!frame && dx * dx + dy * dy <= 1) col = Math.abs(o - 13) < 1 ? '#fff6ee' : '#ff8a2a';
+      if (!frame && o > 3 && o < 8 && Math.abs(v - 13) <= 7 - o) col = '#ff7a1a';
+      if (o === 16 && v === 12) col = OUT;
+      g.fillStyle = col; g.fillRect(x, R(yb) - 34 - v, 1, 1);
+    }
+  }
+  { const [cx, cy] = isoPt(0, 7.5), y = R(cy) - 76; disc(cx, y, 6, '#6b3f1f'); disc(cx, y, 5, '#fbfbf6'); g.fillStyle = OUT; g.fillRect(R(cx), y - 4, 1, 4); g.fillRect(R(cx), y, 3, 1); }
+  // pier railing along the front edges
+  const rail = [];
+  for (let i = -2; i <= n + 2; i += 1.5) rail.push(isoPt(i, n + 3));
+  for (let k = 0; k < rail.length - 1; k++) { const [ax, ay] = rail[k], [bx, by] = rail[k + 1]; pcurve(ax, ay - 2, (ax + bx) / 2, (ay + by) / 2 + 1, bx, by - 2, '#e8d8a0'); }
+  rail.forEach(([x, y]) => { g.fillStyle = OUT; g.fillRect(R(x) - 2, R(y) - 6, 4, 13); g.fillStyle = '#8a5428'; g.fillRect(R(x) - 1, R(y) - 5, 2, 11); g.fillStyle = '#c98a52'; g.fillRect(R(x) - 1, R(y) - 5, 2, 1); });
+  // life ring, flower pots and the menu board by the door
+  { const [rx2, ry2] = isoC(n + .9, -.4); disc(rx2, ry2 - 16, 8, OUT); disc(rx2, ry2 - 16, 7, '#ff6a3a'); disc(rx2, ry2 - 16, 3.6, OUT); disc(rx2, ry2 - 16, 2.6, '#46bcd0');
+    g.fillStyle = '#ffffff'; [[-6, 0], [5, 0], [0, -6], [0, 5]].forEach(([dx, dy]) => g.fillRect(R(rx2 + dx), R(ry2 - 16 + dy), 2, 2)); }
+  [[n + .8, 5.1], [n + 1.6, 8.9]].forEach(([i, j], k) => { const [fx, fy] = isoC(i, j); g.fillStyle = OUT; g.fillRect(R(fx) - 6, R(fy) - 11, 12, 11); g.fillStyle = '#c0703a'; g.fillRect(R(fx) - 5, R(fy) - 10, 10, 9); g.fillStyle = '#e08a50'; g.fillRect(R(fx) - 5, R(fy) - 10, 10, 2);
+    [[-3, -14], [2, -16], [0, -12], [4, -12], [-4, -11]].forEach(([dx, dy], q) => { disc(fx + dx, fy + dy, 2.2, '#2e8a47'); if (q < 3) { g.fillStyle = k ? '#ffc83a' : '#ff6fae'; g.fillRect(R(fx + dx), R(fy + dy) - 1, 2, 2); } }); });
+  { const [mx, my] = isoC(n + 1.4, 6.1); g.fillStyle = OUT; g.fillRect(R(mx) - 9, R(my) - 22, 18, 16); g.fillStyle = '#8a5428'; g.fillRect(R(mx) - 8, R(my) - 21, 16, 14); g.fillStyle = '#2e4a3a'; g.fillRect(R(mx) - 7, R(my) - 20, 14, 12);
+    g.fillStyle = '#fbfbf6'; g.fillRect(R(mx) - 5, R(my) - 18, 8, 1); g.fillRect(R(mx) - 5, R(my) - 15, 10, 1); g.fillRect(R(mx) - 5, R(my) - 12, 6, 1); g.fillStyle = '#ffc83a'; g.fillRect(R(mx) + 3, R(my) - 19, 2, 2);
+    g.fillStyle = OUT; g.fillRect(R(mx) - 8, R(my) - 6, 2, 6); g.fillRect(R(mx) + 6, R(my) - 6, 2, 6); }
   // outside: barrels and a lamp post on the pier
   [[-1.2, 5], [-1.2, 6.1], [9.2, 1.2]].forEach(([i, j]) => { const [bx, by] = isoC(i, j); g.fillStyle = OUT; g.fillRect(R(bx) - 7, R(by) - 18, 14, 18); g.fillStyle = '#8a5a30'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 16); g.fillStyle = '#5a3418'; g.fillRect(R(bx) - 6, R(by) - 13, 12, 2); g.fillRect(R(bx) - 6, R(by) - 6, 12, 2); g.fillStyle = '#a8703a'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 2); });
   g = keep;
@@ -1021,7 +1098,7 @@ function drawCafeIso(eq) {
   // kitchen: fridge, counter with stove, chef
   L.push({ y: isoPt(1, 1)[1], f: () => { isoBox(0, 0, 1, 1, 46, '#f4f8fc', '#d0d8e0', '#b8c0cc'); const [fx, fy] = isoPt(1, 1); g.fillStyle = '#8a93a6'; g.fillRect(R(fx) - 12, R(fy) - 36, 1, 10); g.fillRect(R(fx) - 12, R(fy) - 22, 1, 6); } });
   const chefFace = cafe.chefT > 0 ? 'happy' : blinkT < 0 ? 'blink' : 'normal', [chx, chy] = isoC(0.1, 2.3);
-  L.push({ y: chy, f: () => g.drawImage(chefImg(chefFace, WALLET.eq.fur), R(chx) - 13, R(chy) - 34 + (cafe.svc ? R(Math.abs(Math.sin(T * 6))) : 0)) });
+  L.push({ y: chy, f: () => { softShadow(chx, chy, 10); g.drawImage(chefImg(chefFace, WALLET.eq.fur, cafe.svc ? Math.floor(T * 4) % 2 : 0), R(chx) - 13, R(chy) - 34); } });
   L.push({ y: isoPt(2, 4)[1], f: () => {
     isoBox(1, 1, 2, 4, 18, '#dfe4ea', '#9aa0aa', '#7a808a');
     const [sx, sy] = isoC(1, 1.6); const top = sy - 18;
@@ -1030,6 +1107,8 @@ function drawCafeIso(eq) {
     else { diamondC(sx, top - 1, 8, 4, '#3a3a46'); g.fillStyle = OUT; g.fillRect(R(sx) - 6, R(top) - 5, 12, 3); g.fillStyle = '#5a5a66'; g.fillRect(R(sx) - 5, R(top) - 5, 10, 2); g.fillRect(R(sx) + 5, R(top) - 5, 6, 1); }
     if (cafe.svc) { g.globalAlpha = .6; g.fillStyle = '#ffffff'; for (let i = 0; i < 3; i++) { const u = (T * .8 + i / 3) % 1; g.fillRect(R(sx - 3 + i * 3 + Math.sin(T * 4 + i) * 1.5), R(top - 12 - u * 16), 1, 1); } g.globalAlpha = 1; }
     const [px, py] = isoC(1, 3.1); g.drawImage(dishImg('clown'), R(px) - 12, R(py) - 18 - 16);
+    const [bx2, by2] = isoC(1, 2.3); diamondC(bx2, by2 - 19, 7, 3.5, '#6b3f1f'); diamondC(bx2, by2 - 20, 6, 3, '#d9a06a'); g.fillStyle = '#9cc0dc'; g.fillRect(R(bx2) - 3, R(by2) - 21, 6, 2);
+    const [sx2, sy2] = isoC(1.2, 3.8); for (let q = 0; q < 3; q++) { g.fillStyle = mixHex('#f4f6f8', OUT, .6); g.fillRect(R(sx2) - 5, R(sy2) - 20 - q * 2, 10, 1); g.fillStyle = '#f4f6f8'; g.fillRect(R(sx2) - 4, R(sy2) - 21 - q * 2, 8, 1); }
   } });
   // aquarium against the right wall
   if (eq.tank !== 'none') {
@@ -1040,8 +1119,8 @@ function drawCafeIso(eq) {
         isoBox(3, 0, 5, 1, 30, '#8fe0f0', '#5ec8e0', '#46b0d0', 8);
         const [ax, ay] = isoPt(3, 1), [bx, by] = isoPt(5, 1);
         for (let x = R(ax) + 1; x < bx; x++) { const yb = ay + (by - ay) * (x - ax) / (bx - ax) - 8; g.fillStyle = '#e8d8a0'; g.fillRect(x, R(yb) - 4, 1, 4); if (x % 7 === 0) { g.fillStyle = '#3fae5a'; for (let k = 0; k < 9; k++) g.fillRect(x + R(Math.sin(T * 2 + k * .5 + x)), R(yb) - 5 - k, 1, 1); } }
-        tankFish().slice(0, 5).forEach((k, i) => {
-          const S = SPR[k], sc = .6, fw = S.w * sc, fh = S.h * sc, u0 = (T * .12 + i * .31) % 2, u = u0 < 1 ? u0 : 2 - u0, dir = u0 < 1 ? 1 : -1;
+        tankFish().filter(k => SPR[k].w <= 22 && SPR[k].h <= 12).slice(0, 4).forEach((k, i) => {
+          const S = SPR[k], sc = 1, fw = S.w * sc, fh = S.h * sc, u0 = (T * .12 + i * .31) % 2, u = u0 < 1 ? u0 : 2 - u0, dir = u0 < 1 ? 1 : -1;
           const x = ax + 2 + (bx - ax - 4 - fw) * u, yb = ay + (by - ay) * ((x - ax) / (bx - ax)) - 8, y = yb - 8 - (i * 5) % 18 - fh + Math.sin(T * 2 + i);
           g.drawImage(DEX.fish[k].shiny ? (dir > 0 ? S.gr : S.gl) : (dir > 0 ? S.r : S.l), R(x), R(y), R(fw), R(fh));
         });
@@ -1050,7 +1129,7 @@ function drawCafeIso(eq) {
         isoBox(4, 0, 5, 1, 16, '#a86a32', '#8a5428', '#6b3f1f');
         const [cx, cy] = isoC(4, .5), by = cy - 16 - 9;
         disc(cx, by, 10, OUT); disc(cx, by, 9, '#5ec8e0'); g.fillStyle = '#8fe0f0'; g.fillRect(R(cx) - 8, R(by) - 6, 16, 2);
-        tankFish().slice(0, 2).forEach((k, i) => { const S = SPR[k], sc = .4, u = Math.sin(T * .8 + i * 2), dir = Math.cos(T * .8 + i * 2) > 0 ? 1 : -1; g.drawImage(dir > 0 ? S.r : S.l, R(cx - S.w * sc / 2 + u * 4), R(by - 2 + i * 4 - S.h * sc / 2), R(S.w * sc), R(S.h * sc)); });
+        tankFish().filter(k => SPR[k].w <= 16 && SPR[k].h <= 10).slice(0, 1).forEach((k, i) => { const S = SPR[k], sc = 1, u = Math.sin(T * .8 + i * 2), dir = Math.cos(T * .8 + i * 2) > 0 ? 1 : -1; g.drawImage(dir > 0 ? S.r : S.l, R(cx - S.w * sc / 2 + u * 4), R(by - 2 + i * 4 - S.h * sc / 2), R(S.w * sc), R(S.h * sc)); });
       }
     } });
   }
@@ -1068,6 +1147,7 @@ function drawCafeIso(eq) {
     const [cx, cy] = isoC(...TABLES[k]);
     L.push({ y: cy - 5.2, f: () => { diamondC(cx - 9, cy - 11, 7, 3.5, OUT); diamondC(cx - 9, cy - 12, 6, 3, '#c0392b'); g.fillStyle = OUT; g.fillRect(R(cx) - 16, R(cy) - 26, 2, 16); g.fillStyle = '#8a5428'; g.fillRect(R(cx) - 15, R(cy) - 25, 1, 14); } });
     L.push({ y: cy + 1, f: () => {
+      softShadow(cx + 2, cy, 12);
       g.fillStyle = OUT; g.fillRect(R(cx) + 1, R(cy) - 9, 3, 9); g.fillStyle = '#6b3f1f'; g.fillRect(R(cx) + 2, R(cy) - 9, 1, 8);
       diamondC(cx + 2, cy - 11, 15, 7.5, OUT); diamondC(cx + 2, cy - 12, 14, 7, '#c98a52'); diamondC(cx + 2, cy - 13, 13, 6, '#d9a06a');
       const c = cafe.cust.find(q => q.seat === k && q.ph === 'eat');
@@ -1076,9 +1156,15 @@ function drawCafeIso(eq) {
   }
   for (const c of cafe.cust) {
     const sitting = c.ph === 'eat', fr = sitting ? 0 : 1 + Math.floor(c.t * 6) % 2, b = guestBody(c.look, fr), img = (c.face || -1) > 0 ? b.f : b.c;
-    const bob = sitting ? R(Math.abs(Math.sin(c.t * 7))) : 0;
-    L.push({ y: c.y + (sitting ? 0 : .5), f: () => g.drawImage(img, R(c.x) - b.cx, R(c.y) - img.height + (sitting ? -4 : 0) - bob) });
+    const bob = sitting ? R(Math.abs(Math.sin(c.t * 7))) : (fr === 2 ? 1 : 0), top = R(c.y) - img.height + (sitting ? -4 : 0) - bob;
+    L.push({ y: c.y + (sitting ? 0 : .5), f: () => {
+      if (!sitting) softShadow(c.x, c.y, img.width / 2.4);
+      g.drawImage(img, R(c.x) - b.cx, top);
+      if (c.heart > 0) { const hy = top - 6 - R((1 - c.heart) * 10), hx = R(c.x) - 3; g.globalAlpha = Math.min(1, c.heart * 2); g.fillStyle = OUT; g.fillRect(hx - 1, hy - 1, 9, 7); g.fillStyle = '#ff4d6d'; g.fillRect(hx, hy, 3, 2); g.fillRect(hx + 4, hy, 3, 2); g.fillRect(hx, hy + 2, 7, 1); g.fillRect(hx + 1, hy + 3, 5, 1); g.fillRect(hx + 2, hy + 4, 3, 1); g.fillStyle = '#ffd0da'; g.fillRect(hx + 1, hy, 1, 1); g.globalAlpha = 1; }
+    } });
   }
+  // cat napping on a cushion by the left wall
+  { const [nx, ny] = isoC(.3, 6.4); L.push({ y: ny, f: () => { softShadow(nx, ny, 12); g.drawImage(napCat(), R(nx) - 12, R(ny) - 14); const z = (T * .6) % 1; g.globalAlpha = 1 - z; g.fillStyle = '#ffffff'; const zx = R(nx) + 4 + R(z * 6), zy = R(ny) - 18 - R(z * 12); g.fillRect(zx, zy, 4, 1); g.fillRect(zx + 2, zy + 1, 1, 1); g.fillRect(zx + 1, zy + 2, 1, 1); g.fillRect(zx, zy + 3, 4, 1); g.globalAlpha = 1; } }); }
   L.sort((a, b) => a.y - b.y).forEach(o => o.f());
   // wall lamps on both back walls
   if (eq.lamp !== 'none') [[0, 6.2], [0, .6], [1.6, 0]].forEach(([i, j], k) => {
