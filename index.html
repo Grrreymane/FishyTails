@@ -1290,6 +1290,39 @@ function drawChair(sx, sy) {
   }
   diamondC(sx, sy - 6, 8, 4, mixHex('#8a5428', OUT, .6)); diamondC(sx, sy - 7, 7, 3.5, '#8a5428'); diamondC(sx, sy - 8, 6, 3, '#c0392b'); diamondC(sx - 1, sy - 9, 3, 1.5, '#e05a50');
 }
+// wooden barrel standing on (bx, by): shaded staves, bulging silhouette, two curved iron hoops, round lid
+function drawBarrel(bx, by) {
+  softShadow(bx, by, 9);
+  const W2 = 7, H = 18, x0 = R(bx) - W2, base = R(by);
+  const curve = i => Math.sin((i + .5) / (W2 * 2) * Math.PI);
+  for (let i = -1; i <= W2 * 2; i++) { const cv = i < 0 || i >= W2 * 2 ? 0 : curve(i); g.fillStyle = OUT; g.fillRect(x0 + i, base - H - 1 + R(cv * 1.5), 1, H + 2); }
+  for (let i = 0; i < W2 * 2; i++) {
+    const t = (i + .5) / (W2 * 2), cv = curve(i), yb = base - 1 + R(cv * 1.5);
+    g.fillStyle = t < .12 || t > .86 ? '#5a3418' : t > .22 && t < .42 ? '#b8804a' : t > .66 ? '#7a4a24' : '#9a6232';
+    g.fillRect(x0 + i, base - H + 3 + R(cv * 1.5), 1, yb - (base - H + 3 + R(cv * 1.5)) + 1);
+    if (i % 3 === 2 && i < W2 * 2 - 1) { g.fillStyle = '#6b3f1f'; g.fillRect(x0 + i, base - H + 4 + R(cv * 1.5), 1, H - 5); }
+    for (const hy of [base - H + 6, base - 4]) { g.fillStyle = t > .22 && t < .42 ? '#a8b0bc' : '#5a606c'; g.fillRect(x0 + i, hy + R(cv * 1.5), 1, 2); }
+  }
+  // lid: an ellipse seen from above with a darker rim ring
+  for (let dy = -3; dy <= 3; dy++) { const w = R(W2 * Math.sqrt(1 - (dy / 3.5) ** 2)); g.fillStyle = Math.abs(dy) === 3 ? '#6b3f1f' : '#c89458'; g.fillRect(R(bx) - w, base - H + 1 + dy, w * 2, 1); }
+  g.fillStyle = '#e0b07a'; g.fillRect(R(bx) - 4, base - H - 1, 5, 1);
+  g.fillStyle = '#8a5428'; g.fillRect(R(bx) - 3, base - H + 2, 7, 1);
+}
+// slatted crate on tile (i, j) with a few fish tails sticking out of the top
+function drawFishCrate(i, j, k) {
+  const [cx, cy] = isoC(i, j); softShadow(cx, cy, 11);
+  isoBox(i + .18, j + .18, i + .82, j + .82, 10, '#5a3418', '#b8804a', '#9a6232');
+  g.fillStyle = '#7a4a24';
+  for (const f of [.33, .66]) { const [ax, ay] = isoPt(i + .18, j + .18 + .64 * f), [bx2, by2] = isoPt(i + .18 + .64 * f, j + .82); g.fillRect(R(ax), R(ay) - 10, 1, 10); g.fillRect(R(bx2), R(by2) - 10, 1, 10); }
+  const [lx, ly] = isoPt(i + .18, j + .82); g.fillStyle = '#d9a06a'; g.fillRect(R(lx) + 1, R(ly) - 6, R(cx - lx) - 1, 1);
+  const fish = k ? ['#ff8a2a', '#b8c8d8', '#ff8a2a'] : ['#b8c8d8', '#9ad0ff', '#b8c8d8'];
+  [[-5, -14, 1], [0, -16, -1], [4, -13, 1]].forEach(([dx, dy, d], q) => {
+    const fx = R(cx + dx), fy = R(cy + dy);
+    g.fillStyle = OUT; g.fillRect(fx - 3, fy - 1, 7, 4);
+    g.fillStyle = fish[q]; g.fillRect(fx - 2, fy, 5, 2); g.fillStyle = '#ffffff'; g.fillRect(fx - 2 + (d > 0 ? 3 : 1), fy, 1, 1);
+    g.fillStyle = shade(fish[q], -40); g.fillRect(d > 0 ? fx - 4 : fx + 4, fy - 1, 1, 4);
+  });
+}
 function softShadow(x, y, hw) { g.globalAlpha = .2; diamondC(x, y, R(hw), Math.max(1, R(hw / 2)), '#2a1a10'); g.globalAlpha = 1; }
 const napCat = () => art('napcat', () => ((c, x = c.getContext('2d')) => { x.fillStyle = '#6e5a50'; [[21, 8], [22, 7], [21, 9], [22, 10]].forEach(([i, j]) => x.fillRect(i, j, 1, 1)); return c; })(paint(24, 16, G => {
   G.ell(12, 12, 11, 3.5, '#c0392b'); G.ell(12, 11, 10, 2.8, '#e05a50');
@@ -1404,8 +1437,9 @@ function cafeBg(wall, floor) {
   { const [mx, my] = isoC(n + 1.5, 8.2); g.fillStyle = OUT; g.fillRect(R(mx) - 9, R(my) - 22, 18, 16); g.fillStyle = '#8a5428'; g.fillRect(R(mx) - 8, R(my) - 21, 16, 14); g.fillStyle = '#2e4a3a'; g.fillRect(R(mx) - 7, R(my) - 20, 14, 12);
     g.fillStyle = '#fbfbf6'; g.fillRect(R(mx) - 5, R(my) - 18, 8, 1); g.fillRect(R(mx) - 5, R(my) - 15, 10, 1); g.fillRect(R(mx) - 5, R(my) - 12, 6, 1); g.fillStyle = '#ffc83a'; g.fillRect(R(mx) + 3, R(my) - 19, 2, 2);
     g.fillStyle = OUT; g.fillRect(R(mx) - 8, R(my) - 6, 2, 6); g.fillRect(R(mx) + 6, R(my) - 6, 2, 6); }
-  // outside: barrels and a lamp post on the pier
-  [[-1.2, 5], [-1.2, 6.1], [E - 1.2, 9.5], [E - 1.2, 10.6]].forEach(([i, j]) => { const [bx, by] = isoC(i, j); g.fillStyle = OUT; g.fillRect(R(bx) - 7, R(by) - 18, 14, 18); g.fillStyle = '#8a5a30'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 16); g.fillStyle = '#5a3418'; g.fillRect(R(bx) - 6, R(by) - 13, 12, 2); g.fillRect(R(bx) - 6, R(by) - 6, 12, 2); g.fillStyle = '#a8703a'; g.fillRect(R(bx) - 6, R(by) - 17, 12, 2); });
+  // outside on the pier: a barrel and a crate of fresh fish at each end
+  [[-1.2, 5], [E - 1.2, 9.5]].forEach(([i, j]) => { const [bx, by] = isoC(i, j); drawBarrel(bx, by); });
+  [[-1.2, 6.1], [E - 1.2, 10.6]].forEach(([i, j], k) => drawFishCrate(i, j, k));
   g = keep;
   return (CAFE_BG[key] = c);
 }
