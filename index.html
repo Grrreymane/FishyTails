@@ -1045,6 +1045,8 @@ function guestSpr(size, kind, cloth, acc) {
   });
 }
 function newGuestLook() {
+  const pets = Object.keys(ANIMALS).filter(k => popLevel() >= ANIMALS[k].lv);
+  if (pets.length && Math.random() < .3) return { size: 'm', kind: pick(pets), cloth: '-', acc: null, animal: true };
   const r = Math.random(), size = r < .33 ? 's' : r < .75 ? 'm' : 'l';
   const kind = size === 'l' ? pick(Object.keys(BIG)) : pick(['orange', 'tabby', 'cow', 'black', 'calico', 'white', 'grey']);
   const acc = size === 'l' ? pick(['suit', 'suit', 'flower']) : pick([null, 'bow', 'scarf']);
@@ -1105,11 +1107,12 @@ if (CAFE.up) {
 delete CAFE.orders;
 Object.keys(CAFE.cooler).forEach(k => { if (DISH[k]) CAFE.known[k] = true; });
 Object.keys(CAFE.boss).forEach(k => { CAFE.known['b_' + k] = true; });
+CAFE.trophy = CAFE.trophy || {};
 const saveCafe = () => save('sea-monster-cafe', CAFE);
 saveCafe();
 const decoOwns = (s, id) => DECO[s].items[0].id === id || CAFE.deco.owned[s].includes(id);
 const decoItem = (s, id) => DECO[s].items.find(i => i.id === id) || DECO[s].items[0];
-const charm = eq => DECO_SLOTS.reduce((n, s) => n + (decoItem(s, eq[s]).charm || 0), 0);
+const charm = eq => DECO_SLOTS.reduce((n, s) => n + (decoItem(s, eq[s]).charm || 0), 0) + Object.keys(CAFE.trophy).length * 3;
 // returns true when this is a brand-new recipe
 function storeFish(k, prem) {
   const c = CAFE.cooler[k] || (CAFE.cooler[k] = { n: 0, p: 0 }); c.n++; if (prem) c.p++;
@@ -1118,6 +1121,82 @@ function storeFish(k, prem) {
 function addBossServings(k) { CAFE.boss[k] = (CAFE.boss[k] || 0) + 3; CAFE.known['b_' + k] = true; saveCafe(); }
 const stockOf = k => DISH[k].boss ? (CAFE.boss[DISH[k].boss] || 0) : (CAFE.cooler[k] ? CAFE.cooler[k].n : 0);
 const totalStock = () => DISH_KEYS.reduce((s, k) => s + stockOf(k), 0);
+
+// ---------- dex rewards: completing a sea (4 fish + its monster) puts a keepsake on the café's display shelves
+const trophyStand = (G, col, hi) => { G.rect(2, 10, 8, 2, col || '#8a5428'); G.rect(2, 10, 8, 1, hi || '#b8804a'); };
+const TROPHY = [
+  { name: '海星摆件', draw: G => { trophyStand(G); G.ell(6, 5.5, 4.8, 4.8, (x, y) => { const dx = x + .5 - 6, dy = y + .5 - 5.5, d = Math.hypot(dx, dy), a = Math.atan2(dy, dx) + Math.PI / 2; return d <= 1.9 + 2.6 * Math.pow((Math.cos(5 * a) + 1) / 2, 1.5) ? (d < 1.2 ? '#ffd0a0' : '#ff9a4a') : null; }); } },
+  { name: '珊瑚盆景', draw: G => { trophyStand(G); [[6, 9, 6, 1], [6, 6, 3, 3], [6, 5, 9, 2], [3, 3, 3, 1], [9, 2, 10, 1]].forEach(([a, b, c, d]) => gLine(G, a, b, c, d, '#ff7aa2')); gLine(G, 7, 9, 7, 5, '#e85a8a'); [[3, 1], [10, 1], [6, 1]].forEach(([x, y]) => G.set(x, y, '#ffc0d4')); } },
+  { name: '冰雕企鹅', draw: G => { trophyStand(G); G.ell(6, 6.8, 3, 3.2, '#a8dcf4'); G.ell(6, 7.3, 1.8, 2.3, '#eafaff'); G.ell(6, 3, 2.4, 2.2, '#a8dcf4'); G.set(5, 3, '#3a78b0'); G.set(7, 3, '#3a78b0'); G.set(6, 4, '#6fb8e0'); G.set(4, 2, '#ffffff'); } },
+  { name: '船舵', draw: G => { trophyStand(G); G.ell(6, 5.5, 4.3, 4.3, (x, y) => { const dx = x + .5 - 6, dy = y + .5 - 5.5, d = Math.hypot(dx, dy); return d > 2.9 ? '#a86a32' : d < 1.3 ? '#6b3f1f' : (Math.abs(dx) < .7 || Math.abs(dy) < .7) ? '#8a5428' : null; }); G.set(6, 0, '#6b3f1f'); G.set(1, 5, '#6b3f1f'); G.set(10, 5, '#6b3f1f'); } },
+  { name: '熔岩灯', draw: G => { trophyStand(G); G.rect(4, 1, 4, 1, '#c0c8d0'); G.ell(6, 5, 2.6, 3.6, '#6a2a7a'); G.ell(6, 3.5, 1.2, 1.1, '#ff7a2a'); G.ell(5.5, 6.5, 1, 1, '#ffb03a'); G.rect(4, 9, 4, 1, '#c0c8d0'); } },
+  { name: '灯笼鱼灯', draw: G => { trophyStand(G); G.tri(3, 6.5, 1, 4.5, 1, 8.5, '#3a3a5a'); G.ell(6, 6.5, 3.8, 2.8, '#4a4a6a'); G.set(8, 7, '#ffffff'); G.set(9, 7, '#ffffff'); G.set(8, 5, '#ffe14a'); gLine(G, 7, 4, 8, 1, '#5a5a7a'); G.ell(9.3, 1.3, 1.3, 1.3, '#ffe14a'); } },
+  { name: '古神石像', draw: G => { trophyStand(G); G.rect(4, 1, 5, 8, '#9aa0aa'); G.rect(4, 1, 5, 1, '#7a808a'); G.rect(4, 3, 5, 1, '#6a707a'); G.rect(6, 4, 1, 3, '#7a808a'); G.set(5, 4, '#5ff2d0'); G.set(7, 4, '#5ff2d0'); G.rect(5, 7, 3, 1, '#6a707a'); } },
+  { name: '星星瓶', draw: G => { trophyStand(G); G.rect(3, 2, 6, 7, '#cfeefa'); G.rect(4, 1, 4, 1, '#c98a52'); [[4, 4], [7, 5], [5, 7], [6, 3], [7, 7]].forEach(([x, y]) => G.set(x, y, '#ffd23f')); G.rect(3, 3, 1, 4, '#ffffff'); } },
+  { name: '龙珠', draw: G => { trophyStand(G, '#c0392b', '#ffd23f'); [[3, 8], [8, 8], [3, 9], [8, 9]].forEach(([x, y]) => G.set(x, y, '#ffd23f')); G.ell(6, 5.5, 3.3, 3.3, (x, y) => y < 5 ? '#fff6fb' : '#f4d8ec'); G.set(5, 4, '#ffffff'); } },
+];
+const trophyImg = zi => art('trophy' + zi, () => paint(12, 13, TROPHY[zi].draw));
+const trophySil = zi => art('trophyS' + zi, () => tintC(trophyImg(zi), '#8a7a60'));
+function checkTrophies(announce) {
+  ZONES.forEach((z, zi) => {
+    if (CAFE.trophy[zi] || !TROPHY[zi] || !DEX.boss[z.boss] || !z.fish.every(k => DEX.fish[k])) return;
+    CAFE.trophy[zi] = true; saveCafe();
+    if (announce) { pop('图鉴集齐! 小馆得到「' + TROPHY[zi].name + '」', 90, 100, '#ffe14a', 9, 3.5); SFX.buff(); }
+  });
+}
+checkTrophies(false);
+
+// ---------- popularity: every guest served (or turtle rescued) adds 1; levels invite new kinds of guests
+const POP_LV = [0, 15, 40, 80, 140, 220, 320];
+const popLevel = () => POP_LV.filter(v => CAFE.pop >= v).length;
+const ANIMALS = {
+  penguin: { name: '企鹅', lv: 2, say: ['嘎~ 这里好凉快', '想吃冰冰的鱼'] },
+  otter:   { name: '海獭', lv: 3, say: ['要看我的贝壳吗?', '吃完要睡午觉~'] },
+  seal:    { name: '海豹', lv: 4, say: ['呜噢~ 呜噢~', '这个鱼好新鲜!'] },
+  octopus: { name: '章鱼', lv: 5, say: ['八只手都想吃!', '我要八份!'] },
+};
+function addPop(n) {
+  const lv0 = popLevel(); CAFE.pop += n; saveCafe();
+  const lv = popLevel();
+  if (lv > lv0) { const a = Object.keys(ANIMALS).find(k => ANIMALS[k].lv === lv); pop('人气升到 Lv.' + lv + (a ? '! ' + ANIMALS[a].name + '客人要来了' : '!'), 90, 76, '#ffd0da', 10, 3); SFX.win(); }
+}
+// front-facing animal guests, same canvas / anchor as a medium cat (22x27, centre x 9); frame 0 stand, 1-2 walk
+function animalSpr(kind, fr) {
+  const up = [[0, 0], [1, 0], [0, 1]][fr];
+  const c = paint(22, 27, G => {
+    if (kind === 'penguin') {
+      G.rect(5, 24 - up[0], 3, 2, '#ff9a2a'); G.rect(10, 24 - up[1], 3, 2, '#ff9a2a');
+      G.tri(3.5, 11, 1, 19, 4.5, 18, '#2a2e44'); G.tri(14.5, 11, 17, 19, 13.5, 18, '#2a2e44');
+      G.ell(9, 15, 7, 9.5, '#2a2e44'); G.ell(9, 17, 4.6, 7, '#fbfbf6');
+      G.ell(6.5, 8.5, 2, 1.8, '#fbfbf6'); G.ell(11.5, 8.5, 2, 1.8, '#fbfbf6'); G.set(7, 8, OUT); G.set(11, 8, OUT);
+      G.tri(7.5, 10, 10.5, 10, 9, 12.5, '#ff9a2a'); G.set(5, 11, '#ffb0c0'); G.set(13, 11, '#ffb0c0');
+    } else if (kind === 'otter') {
+      const B = '#8a5a3a', L = '#e8cfa8';
+      G.tri(13, 20, 20, 23, 14, 23, B);
+      G.rect(6, 23 - up[0], 2, 3, B); G.rect(10, 23 - up[1], 2, 3, B);
+      G.ell(9, 17, 5.5, 6.5, B); G.ell(9, 18, 3.6, 5, L);
+      G.ell(4.2, 4, 1.4, 1.4, B); G.ell(13.8, 4, 1.4, 1.4, B); G.ell(9, 7.5, 5.5, 4.8, B); G.ell(9, 9, 3.4, 2.4, L);
+      G.set(7, 7, OUT); G.set(11, 7, OUT); G.rect(8, 8, 2, 1, OUT);
+      G.ell(9, 16, 2.4, 1.8, '#a8b0bc'); G.set(8, 15, '#dfe6ee'); G.set(6, 16, B); G.set(12, 16, B);
+    } else if (kind === 'seal') {
+      const S = '#9aa4b0', D = '#7a8490';
+      G.tri(3, 24, 0, 26, 7, 26, D); G.tri(15, 24, 18, 26, 11, 26, D);
+      G.tri(3.5, 14, .5, 20 + up[0], 4, 19, D); G.tri(14.5, 14, 17.5, 20 + up[1], 14, 19, D);
+      G.ell(9, 18, 7, 7.5, S); G.ell(9, 20, 4, 5, '#c8d0d8'); G.ell(9, 9, 5.5, 5, S);
+      [[5, 15], [13, 13], [12, 17], [6, 20]].forEach(([x, y]) => G.set(x, y, D));
+      G.ell(6.8, 8.3, 1.3, 1.5, OUT); G.ell(11.2, 8.3, 1.3, 1.5, OUT); G.set(6, 7, '#ffffff'); G.set(10, 7, '#ffffff');
+      G.ell(9, 11, 1.8, 1.1, '#dfe6ee'); G.set(9, 10, OUT);
+    } else {
+      const P = '#e87aa8', D = '#c0507e';
+      for (let k = 0; k < 4; k++) { const sw = fr && (k + fr) % 2 ? 1 : 0, x = 3 + k * 4 + sw; G.rect(x, 17, 3, 7, P); G.set(x + 1, 24, P); G.set(x, 20, '#ffc0d8'); G.set(x, 22, '#ffc0d8'); }
+      G.ell(9, 11, 7.5, 7.5, P); G.ell(6, 7, 2, 1.5, '#ffb0cc'); [[12, 6], [14, 10], [4, 10]].forEach(([x, y]) => G.set(x, y, D));
+      G.ell(6.5, 12, 1.5, 1.8, '#ffffff'); G.ell(11.5, 12, 1.5, 1.8, '#ffffff'); G.set(7, 12, OUT); G.set(12, 12, OUT); G.rect(8, 15, 3, 1, D);
+    }
+  });
+  if (kind === 'otter') addWhiskers(c, { O: '#8a5a3a' }, 9, 9, 5, 14, 3);
+  if (kind === 'seal') addWhiskers(c, { O: '#9aa4b0' }, 9, 10, 5, 14, 3);
+  return c;
+}
 
 // ---------- service
 // The café is an isometric cut-away shop on a pier, rendered on its own 360x640 canvas (twice the game's
@@ -1140,6 +1219,21 @@ function freeRest() {
   const busy = cafe.cust.filter(c => c.rest != null && c.rest >= 0).map(c => c.rest), free = REST.map((_, i) => i).filter(i => !busy.includes(i));
   return free.length ? pick(free) : -1;
 }
+// tank entries: 'f:key' fish, 's:key' shiny fish, 'b:key' monster baby
+const tankOk = e => { const [t, k] = e.split(':'); return t === 'b' ? !!DEX.boss[k] : !!DEX.fish[k] && (t !== 's' || !!DEX.fish[k].shiny); };
+const tankOptions = () => [...FISH_ORDER.filter(k => DEX.fish[k]).map(k => 'f:' + k), ...FISH_ORDER.filter(k => DEX.fish[k] && DEX.fish[k].shiny).map(k => 's:' + k), ...BOSS_ORDER.filter(k => DEX.boss[k]).map(k => 'b:' + k)];
+function tankSel(max) {
+  const pickd = (CAFE.tank || []).filter(tankOk);
+  if (pickd.length) return pickd.slice(0, max);
+  return tankFish().slice(0, max).map(k => (DEX.fish[k].shiny ? 's:' : 'f:') + k);
+}
+// sprite for an entry facing dir, scaled to fit mw x mh (monster babies come out a little smaller)
+function tankImg(e, dir, mw, mh) {
+  const [t, k] = e.split(':'), S = t === 'b' ? SPRB[k] : SPR[k];
+  const img = t === 's' ? (dir > 0 ? S.gr : S.gl) : (dir > 0 ? S.r : S.l);
+  const sc = t === 'b' ? Math.min(mw * .8 / S.w, mh / S.h) : Math.min(1, mw / S.w, mh / S.h);
+  return { img, w: S.w * sc, h: S.h * sc };
+}
 function tankFish() {
   const score = k => (DEX.fish[k].shiny ? 4 : 0) + (DEX.fish[k].gold ? 2 : 0);
   return FISH_ORDER.filter(k => DEX.fish[k]).sort((a, b) => score(b) - score(a));
@@ -1157,6 +1251,30 @@ function nextDish() {
   else { const c = CAFE.cooler[k]; prem = c.p > 0; c.n--; if (prem) c.p--; }
   CAFE.sold[k] = (CAFE.sold[k] || 0) + 1;
   return { k, price: d.price * (prem ? 2 : 1), prem };
+}
+const SAY = {
+  in: ['肚子饿了喵~', '听说这里的鱼很新鲜', '今天吃什么好呢', '闻到香味了!'],
+  eat: [k => DISH[k].name + '真好吃!', () => '喵呜~ 太香了', () => '主厨手艺真好', k => '再来一份' + DISH[k].name + '!'],
+  rest: ['晒太阳真舒服~', '吃饱了想睡觉', '海风好舒服喵', '下次带朋友来'],
+  out: ['下次还来!', '谢谢款待喵', '好吃到跳起来~'],
+};
+function guestLine(c) {
+  const a = ANIMALS[c.look.kind];
+  if (a && Math.random() < .5) return pick(a.say);
+  if (c.ph === 'eat') return pick(SAY.eat)(c.d.k);
+  return pick(SAY[c.ph === 'toRest' || c.ph === 'rest' ? 'rest' : c.ph === 'in' ? 'in' : 'out']);
+}
+function guestAt(p) {
+  const x = p.x / CS, y = p.y / CS;
+  return cafe.cust.filter(c => c.bb && x >= c.bb[0] - 2 && x < c.bb[0] + c.bb[2] + 2 && y >= c.bb[1] - 2 && y < c.bb[1] + c.bb[3] + 2).sort((a, b) => b.y - a.y)[0];
+}
+function tapGuest(c) {
+  c.say = { s: guestLine(c), t: 2.4 }; c.heart = 1; SFX.click();
+  if (!c.tipped) {
+    c.tipped = true;
+    const v = 5 + (c.look.animal ? 10 : c.look.size === 'l' ? 6 : 0) + Math.floor(Math.random() * 6); earn(v); cafe.earned += v;
+    pop('小费 +' + v, c.x * CS, c.bb[1] * CS - 26, '#ffe14a', 8, 1); SFX.coin(); addPop(1);
+  }
 }
 function openCafe(from) {
   cafe.back = from; cafe.cust = []; cafe.svc = false; cafe.detail = null; cafe.prev = null; cafe.sheet = totalStock() ? 0 : null;
@@ -1179,11 +1297,11 @@ function updCafe(dt) {
     }
   }
   for (let i = cafe.cust.length - 1; i >= 0; i--) {
-    const c = cafe.cust[i]; c.t += dt; if (c.heart > 0) c.heart -= dt;
+    const c = cafe.cust[i]; c.t += dt; if (c.heart > 0) c.heart -= dt; if (c.say) { c.say.t -= dt; if (c.say.t <= 0) c.say = null; }
     if (c.ph === 'eat') {
-      if (c.t > (c.look.size === 'l' ? 1.8 : 1.3)) {
-        const mult = decoItem('stove', CAFE.deco.eq.stove).mult * (c.look.size === 'l' ? 1.3 : 1);
-        const v = R(c.d.price * mult); earn(v); cafe.earned += v;
+      if (c.t > (c.look.size === 'l' || c.look.animal ? 1.8 : 1.3)) {
+        const mult = decoItem('stove', CAFE.deco.eq.stove).mult * (c.look.animal ? 1.5 : c.look.size === 'l' ? 1.3 : 1);
+        const v = R(c.d.price * mult); earn(v); cafe.earned += v; addPop(1);
         pop('+' + v, c.x * CS, c.y * CS - 22, '#ffe14a', 9, .9); SFX.coin();
         c.heart = 1; c.seat = -1;
         const r = freeRest();
@@ -1213,6 +1331,7 @@ function updCafe(dt) {
 
 // ---------- full-body cat guests (walk frames 1/2, stand 0)
 function guestBodySpr(l, frame) {
+  if (ANIMALS[l.kind]) return animalSpr(l.kind, frame);
   const big = l.size === 'l', f = big ? BIG[l.kind] : FUR[l.kind];
   const c = guestBodyPaint(l, frame, big, f), D = GUEST_DIM[l.size], mw = big ? 3.2 : 2.1, headR = Math.floor(D.cx + D.rx - .5);
   return addWhiskers(c, f, D.cx, R(D.cy + D.ry * .55), mw, headR, headR + 3 - Math.floor(D.cx + mw + .5));
@@ -1443,8 +1562,19 @@ function cafeBg(wall, floor) {
   g = keep;
   return (CAFE_BG[key] = c);
 }
+// two display shelves: five spots high on the left wall above the jars, four on the right wall above the tank
+const trophySpot = zi => zi < 5 ? { x: 62 + zi * 14, left: true, rel: 76 } : { x: 184 + (zi - 5) * 11, left: false, rel: 66 };
+const wallBase = (x, left) => ISO.oy + (left ? ISO.ox - x : x - ISO.ox) / 2;
+function drawTrophies() {
+  [[55, 129, true, 76], [177, 225, false, 66]].forEach(([x0, x1, left, rel]) => {
+    for (let x = x0; x < x1; x++) { const yb = R(wallBase(x, left)); g.fillStyle = '#8a5428'; g.fillRect(x, yb - rel - 1, 1, 3); g.fillStyle = x % 12 === 0 ? '#6b3f1f' : '#b8804a'; g.fillRect(x, yb - rel - 1, 1, 1); g.fillStyle = OUT; g.fillRect(x, yb - rel + 2, 1, 1); }
+  });
+  TROPHY.forEach((_, zi) => { if (!CAFE.trophy[zi]) return; const t = trophySpot(zi); g.drawImage(trophyImg(zi), t.x - 6, R(wallBase(t.x, t.left)) - t.rel - 13); });
+  if (CAFE.trophy[8]) { const t = trophySpot(8); g.globalAlpha = .18 + .08 * Math.sin(T * 3); disc(t.x, R(wallBase(t.x, false)) - t.rel - 7, 7, '#fff0f8'); g.globalAlpha = 1; }
+}
 function drawCafeIso(eq) {
   g.drawImage(cafeBg(eq.wall, eq.floor), 0, 0);
+  drawTrophies();
   // gulls
   for (let i = 0; i < 2; i++) { const x = ((T * 14 + i * 150) % 340) - 30, y = 60 + i * 18 + Math.sin(T * 2 + i) * 3, w = Math.floor(T * 5 + i) % 2; g.fillStyle = '#ffffff'; g.fillRect(R(x) - 3, R(y) - w, 3, 1); g.fillRect(R(x) + 1, R(y) - w, 3, 1); g.fillRect(R(x), R(y), 1, 1); }
   // welcome mat
@@ -1474,10 +1604,10 @@ function drawCafeIso(eq) {
         isoBox(2, 0, 5.2, 1, 40, '#8fe0f0', '#5ec8e0', '#46b0d0', 8);
         const [ax, ay] = isoPt(2, 1), [bx, by] = isoPt(5.2, 1);
         for (let x = R(ax) + 1; x < bx; x++) { const yb = ay + (by - ay) * (x - ax) / (bx - ax) - 8; g.fillStyle = '#e8d8a0'; g.fillRect(x, R(yb) - 4, 1, 4); if (x % 7 === 0) { g.fillStyle = '#3fae5a'; for (let k = 0; k < 9; k++) g.fillRect(x + R(Math.sin(T * 2 + k * .5 + x)), R(yb) - 5 - k, 1, 1); } }
-        tankFish().filter(k => SPR[k].w <= 30 && SPR[k].h <= 14).slice(0, 4).forEach((k, i) => {
-          const S = SPR[k], sc = 1, fw = S.w * sc, fh = S.h * sc, sp = .25 + i * .07, u = (Math.sin(T * sp + i * 1.7) + 1) / 2, dir = Math.cos(T * sp + i * 1.7) > 0 ? 1 : -1;
+        tankSel(4).forEach((e, i) => {
+          const sp = .25 + i * .07, u = (Math.sin(T * sp + i * 1.7) + 1) / 2, dir = Math.cos(T * sp + i * 1.7) > 0 ? 1 : -1, F = tankImg(e, dir, 30, 14), fw = F.w, fh = F.h;
           const x = ax + 2 + (bx - ax - 4 - fw) * u, yb = ay + (by - ay) * ((x + fw / 2 - ax) / (bx - ax)) - 8, y = yb - 6 - i * 8 - fh + Math.sin(T * 2 + i);
-          g.drawImage(DEX.fish[k].shiny ? (dir > 0 ? S.gr : S.gl) : (dir > 0 ? S.r : S.l), R(x), R(y), R(fw), R(fh));
+          g.drawImage(F.img, R(x), R(y), R(fw), R(fh));
         });
         g.fillStyle = '#e8fbff'; for (let q = 0; q < 4; q++) { const u = (T * .45 + q / 4) % 1; g.fillRect(R(ax + 8 + q * 12 + Math.sin(T * 3 + q)), R(ay + q * 2 - 12 - u * 32), 1, 1); }
         g.globalAlpha = .3; g.fillStyle = '#ffffff'; g.fillRect(R(ax) + 3, R(ay) - 44, 1, 26); g.fillRect(R(ax) + 5, R(ay) - 43, 1, 10); g.globalAlpha = 1;
@@ -1485,7 +1615,7 @@ function drawCafeIso(eq) {
         isoBox(4, 0, 5, 1, 16, '#a86a32', '#8a5428', '#6b3f1f');
         const [cx, cy] = isoC(4, .5), by = cy - 16 - 9;
         disc(cx, by, 10, OUT); disc(cx, by, 9, '#5ec8e0'); g.fillStyle = '#8fe0f0'; g.fillRect(R(cx) - 8, R(by) - 6, 16, 2);
-        tankFish().filter(k => SPR[k].w <= 16 && SPR[k].h <= 10).slice(0, 1).forEach((k, i) => { const S = SPR[k], sc = 1, u = Math.sin(T * .8 + i * 2), dir = Math.cos(T * .8 + i * 2) > 0 ? 1 : -1; g.drawImage(dir > 0 ? S.r : S.l, R(cx - S.w * sc / 2 + u * 4), R(by - 2 + i * 4 - S.h * sc / 2), R(S.w * sc), R(S.h * sc)); });
+        tankSel(2).forEach((e, i) => { const u = Math.sin(T * .8 + i * 2), dir = Math.cos(T * .8 + i * 2) > 0 ? 1 : -1, F = tankImg(e, dir, 13, 8); g.drawImage(F.img, R(cx - F.w / 2 + u * 4), R(by - 3 + i * 5 - F.h / 2), R(F.w), R(F.h)); });
       }
     } });
   }
@@ -1514,6 +1644,7 @@ function drawCafeIso(eq) {
     const sitting = c.ph === 'eat' || c.ph === 'rest', fr = sitting ? 0 : 1 + Math.floor(c.t * 6) % 2, b = guestBody(c.look, fr), img = (c.face || -1) > 0 ? b.f : b.c;
     const lift = c.ph === 'eat' ? 7 : c.ph === 'rest' ? (REST[c.rest].t === 'lounge' ? 6 : 7) : 0;
     const bob = c.ph === 'eat' ? R(Math.abs(Math.sin(c.t * 7))) : c.ph === 'rest' ? R(Math.sin(c.t * 1.5) * .6 + .4) : (fr === 2 ? 1 : 0), top = R(c.y) - img.height - lift - bob;
+    c.bb = [R(c.x) - b.cx, top, img.width, img.height];
     L.push({ y: c.y + (sitting ? .1 : .5), f: () => {
       if (!sitting) softShadow(c.x, c.y, img.width / 2.4);
       g.drawImage(img, R(c.x) - b.cx, top);
@@ -1557,7 +1688,12 @@ function drawCafeIso(eq) {
 // ---------- menus (normal 180x320 layer)
 const CAFE_TABS = ['营业', '菜谱', '装修'];
 const cafeTabBtn = i => [6 + i * 57, 298, 54, 18];
-const CAFE_BTN = { close: [152, 2, 24, 14], open: [40, 262, 100, 20] };
+const CAFE_BTN = { close: [152, 2, 24, 14], open: [40, 262, 100, 20], tank: [10, 256, 160, 16] };
+const PICK = { prev: [16, 232, 26, 16], next: [138, 232, 26, 16], auto: [16, 256, 66, 18], done: [98, 256, 66, 18] };
+const pickCell = i => [16 + (i % 4) * 38, 64 + Math.floor(i / 4) * 41, 36, 39];
+const BABY = { puffer: '河豚崽', squid: '乌贼崽', crab: '巨蟹崽', ghost: '幽灵鲨崽', serpent: '海蛇崽', kraken: '克拉肯崽', guardian: '守护者崽', starwhale: '星鲸崽', dragon: '小龙王' };
+const tankMax = () => CAFE.deco.eq.tank === 'big' ? 4 : 2;
+const tankBtnOn = () => cafe.sheet === 2 && DECO_SLOTS[cafe.slot] === 'tank' && CAFE.deco.eq.tank !== 'none';
 const slotChip = i => [7 + i * 24, 154, 23, 14];
 const decoRow = i => [10, 172 + i * 27, 160, 25];
 const decoBtn = i => [118, 177 + i * 27, 48, 15];
@@ -1566,14 +1702,31 @@ const recipeCell = i => [8 + (i % 2) * 83, 155 + Math.floor(i / 2) * 21, 81, 20]
 const PAGE_PREV = [8, 266, 26, 16], PAGE_NEXT = [146, 266, 26, 16];
 const menuList = () => DISH_KEYS.filter(k => stockOf(k) > 0);
 const sheetPages = () => cafe.sheet === 0 ? Math.max(1, Math.ceil(menuList().length / 8)) : Math.ceil(DISH_KEYS.length / 10);
+function tankPickPress(p) {
+  const opts = tankOptions(), pages = Math.max(1, Math.ceil(opts.length / 16)), max = tankMax();
+  if (inR(p, PICK.done)) { cafe.pick = false; SFX.click(); return; }
+  if (inR(p, PICK.auto)) { CAFE.tank = null; saveCafe(); cafe.pick = false; pop('鱼缸交给小馆安排啦', 90, 60, '#ffe14a', 9, 1.2); SFX.click(); return; }
+  if (pages > 1 && inR(p, PICK.prev)) { cafe.pickPage = (cafe.pickPage + pages - 1) % pages; SFX.click(); return; }
+  if (pages > 1 && inR(p, PICK.next)) { cafe.pickPage = (cafe.pickPage + 1) % pages; SFX.click(); return; }
+  opts.slice(cafe.pickPage * 16, cafe.pickPage * 16 + 16).forEach((e, i) => {
+    if (!inR(p, pickCell(i))) return;
+    const cur = (CAFE.tank || []).filter(tankOk), at = cur.indexOf(e);
+    if (at >= 0) cur.splice(at, 1);
+    else { if (cur.length >= max) cur.shift(); cur.push(e); }
+    CAFE.tank = cur; saveCafe(); SFX.click();
+  });
+}
 function cafePress(p) {
+  if (cafe.pick) { tankPickPress(p); return; }
   if (cafe.detail) { cafe.detail = null; SFX.click(); return; }
   if (inR(p, CAFE_BTN.close)) { go(cafe.back); st = 2; SFX.click(); return; }
   for (let i = 0; i < 3; i++) if (inR(p, cafeTabBtn(i))) { cafe.sheet = cafe.sheet === i ? null : i; cafe.prev = null; cafe.page = 0; SFX.click(); return; }
+  if (cafe.sheet === null || p.y < 150) { const c = guestAt(p); if (c) { tapGuest(c); return; } }
+  if (tankBtnOn() && inR(p, CAFE_BTN.tank)) { cafe.pick = true; cafe.pickPage = 0; SFX.click(); return; }
   if (cafe.sheet === null) return;
   if (p.y < 150) { cafe.sheet = null; cafe.prev = null; return; }
   if (cafe.sheet === 0 && inR(p, CAFE_BTN.open) && !cafe.svc) {
-    if (totalStock() > 0) { cafe.svc = true; cafe.spawnT = 0; cafe.earned = 0; cafe.sheet = null; SFX.click(); }
+    if (totalStock() > 0) { cafe.svc = true; cafe.spawnT = 0; cafe.earned = 0; cafe.sheet = null; if (!CAFE.opened) { CAFE.opened = true; saveCafe(); } SFX.click(); }
     else { pop('冰箱是空的 去钓鱼吧', 90, 240, '#ff8a7a', 9, 1.2); SFX.fail(); }
     return;
   }
@@ -1603,11 +1756,12 @@ function cafePress(p) {
 function cafeEq() { const eq = Object.assign({}, CAFE.deco.eq); if (cafe.prev) eq[cafe.prev.slot] = cafe.prev.id; return eq; }
 function drawCafe() { drawCafeUI(cafeEq()); }
 function drawCafeUI(eq) {
+  drawBubbles();
   // status bar + shop name plate
   g.fillStyle = '#2a1e14'; g.fillRect(0, 0, W, 18); g.fillStyle = '#4a3424'; g.fillRect(0, 17, W, 1);
   g.drawImage(I.coin, 3, 4); txt(String(WALLET.coins), 14, 9, 8, '#ffe14a', 'left');
-  g.drawImage(I.heart, 58, 4); txt(String(CAFE.pop), 69, 9, 8, '#ffd0da', 'left');
-  g.drawImage(I.star, 92, 5); txt('魅力 ' + charm(eq), 100, 9, 8, '#fff6c0', 'left');
+  g.drawImage(I.heart, 56, 4); txt('Lv' + popLevel(), 67, 9, 8, '#ffd0da', 'left'); txt(String(CAFE.pop), 84, 9, 7, '#ffb0c0', 'left');
+  g.drawImage(I.star, 104, 5); txt('魅力 ' + charm(eq), 112, 9, 8, '#fff6c0', 'left');
   button(CAFE_BTN.close, '×');
   panel(4, 21, 60, 16); txt('渔喵小馆', 34, 29, 8, '#7a3b12', 'center', null);
   if (cafe.svc) { panel(118, 21, 58, 16); txt('营业中 +' + cafe.earned, 147, 29, 7, '#7a3b12', 'center', null); }
@@ -1620,7 +1774,57 @@ function drawCafeUI(eq) {
   });
   if (i0Dot()) { g.fillStyle = OUT; g.fillRect(54, 295, 7, 7); g.fillStyle = '#e8453c'; g.fillRect(55, 296, 5, 5); }
   if (cafe.sheet !== null) drawCafeSheet(eq);
+  drawCafeHints();
   if (cafe.detail) drawDishDetail(cafe.detail);
+  if (cafe.pick) drawTankPicker();
+}
+function drawBubbles() {
+  for (const c of cafe.cust) {
+    if (!c.say || !c.bb) continue;
+    const by = c.bb[1] * CS - 3; if (cafe.sheet !== null && by > 146) continue;
+    const w = c.say.s.length * 7 + 8, bx = clamp(c.x * CS, w / 2 + 2, W - w / 2 - 2), x0 = R(bx - w / 2), y0 = R(by) - 13, a = Math.min(1, c.say.t * 3);
+    g.globalAlpha = a;
+    g.fillStyle = OUT; g.fillRect(x0, y0, w, 11); g.fillRect(R(c.x * CS) - 1, y0 + 11, 3, 2);
+    g.fillStyle = '#fffaf0'; g.fillRect(x0 + 1, y0 + 1, w - 2, 9); g.fillRect(R(c.x * CS), y0 + 10, 1, 2);
+    g.globalAlpha = 1;
+    txt(c.say.s, bx, y0 + 5.5, 7, '#4a2c17', 'center', null, a);
+  }
+}
+// gentle guidance: a bobbing hand shows what to press next
+function drawCafeHints() {
+  if (cafe.svc || cafe.detail || cafe.pick) return;
+  const bob = R(Math.abs(Math.sin(T * 5)) * 3);
+  if (totalStock() > 0) {
+    const r = cafe.sheet === 0 ? CAFE_BTN.open : cafe.sheet === null ? cafeTabBtn(0) : null;
+    if (!r) return;
+    g.drawImage(I.hand, r[0] + r[2] / 2 + 8, r[1] + r[3] - 7 + bob);
+    if (!CAFE.opened && cafe.sheet === null) { panel(22, 268, 104, 16); txt('冰箱有货啦! 点这里开店', 74, 276, 7, '#7a3b12', 'center', null); }
+  } else if (cafe.sheet === null && !cafe.cust.some(c => c.ph !== 'rest')) {
+    g.drawImage(I.hand, 158, 15 + bob);
+    panel(94, 40, 82, 16); txt('冰箱空了 去钓鱼吧', 135, 48, 7, '#7a3b12', 'center', null);
+  }
+}
+function drawTankPicker() {
+  TQ.length = 0;
+  const opts = tankOptions(), pages = Math.max(1, Math.ceil(opts.length / 16)), cur = (CAFE.tank || []).filter(tankOk), max = tankMax(), dark = '#4a2c17';
+  cafe.pickPage = Math.min(cafe.pickPage || 0, pages - 1);
+  g.globalAlpha = .6; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+  panel(10, 40, 160, 240);
+  txt('鱼缸里放哪些?', 90, 51, 9, dark, 'center', null);
+  txt((cur.length ? '已选 ' + cur.length : '自动') + ' / 最多 ' + max + ' 只', 90, 60, 7, '#8a6a4a', 'center', null);
+  if (!opts.length) txt('还没有钓到鱼哦', 90, 140, 8, '#8a6a4a', 'center', null);
+  opts.slice(cafe.pickPage * 16, cafe.pickPage * 16 + 16).forEach((e, i) => {
+    const [x, y, w, h] = pickCell(i), [t, k] = e.split(':'), on = cur.indexOf(e);
+    g.fillStyle = on >= 0 ? '#e0a020' : t === 'b' ? '#b87060' : '#c9a86a'; g.fillRect(x, y, w, h);
+    g.fillStyle = t === 'b' ? '#e8c0a0' : t === 's' ? '#fff0b0' : '#ecd49c'; g.fillRect(x + 1, y + 1, w - 2, h - 2);
+    const S = t === 'b' ? SPRB[k] : SPR[k];
+    drawFit(t === 's' ? S.gr : S.r, x + w / 2, y + 16, w - 6, 24, t === 'b' ? .5 : 2);
+    txt(t === 'b' ? BABY[k] : (SP[k].name.length > 4 ? SP[k].name.slice(0, 4) : SP[k].name), x + w / 2, y + 33, 6.5, t === 'b' ? '#7a2a1a' : dark, 'center', null);
+    if (t === 's') g.drawImage(I.star, x + 2, y + 2);
+    if (on >= 0) { g.fillStyle = OUT; g.fillRect(x + w - 9, y + 1, 8, 8); g.fillStyle = '#e8453c'; g.fillRect(x + w - 8, y + 2, 6, 6); txt(String(on + 1), x + w - 5, y + 5, 6, '#ffffff', 'center', null); }
+  });
+  if (pages > 1) { button(PICK.prev, '◀'); button(PICK.next, '▶'); txt((cafe.pickPage + 1) + ' / ' + pages, 90, 240, 7, dark, 'center', null); }
+  button(PICK.auto, '自动'); button(PICK.done, '完成');
 }
 const i0Dot = () => !cafe.svc && cafe.sheet !== 0 && totalStock() > 0;
 function drawCafeSheet(eq) {
@@ -1666,6 +1870,7 @@ function drawCafeSheet(eq) {
       else if (decoOwns(slot, it.id)) button(b, '摆上');
       else { button(b, ''); if (WALLET.coins < it.price) { g.globalAlpha = .45; g.fillStyle = '#3a2c40'; g.fillRect(...b); g.globalAlpha = 1; } g.drawImage(I.coin, b[0] + 3, b[1] + 3); txt(String(it.price), b[0] + 13, b[1] + 7, 8, '#ffffff', 'left', OUT); }
     });
+    if (tankBtnOn()) button(CAFE_BTN.tank, '选择鱼缸里的鱼');
   }
 }
 function drawDishDetail(k) {
@@ -2308,7 +2513,7 @@ function startShow() {
     const d = BOSSES[leap.key], val = R(d.val * run.gold), first = !DEX.boss[leap.key];
     run.coins += val; earn(val); run.hp = Math.min(6, run.hp + 1);
     DEX.boss[leap.key] = { n: ((DEX.boss[leap.key] || {}).n || 0) + 1 }; save('sea-monster-dex', DEX);
-    addBossServings(leap.key);
+    addBossServings(leap.key); checkTrophies(true);
     show = { boss: true, key: leap.key, name: d.name, val, img: leap.img, w: leap.w, h: leap.h, sc: leap.sc, first, note: '招牌菜 ' + DISH['b_' + leap.key].name + ' +3 份' };
     coinBurst(90, 190, 16); SFX.win(); vib([40, 30, 40, 30, 80]);
   } else {
@@ -2323,7 +2528,8 @@ function startShow() {
     save('sea-monster-dex', DEX);
     run.coins += val; earn(val); applyBuff(sp.buff, sp.lvl); if (shiny) applyBuff(sp.buff, sp.lvl);
     let fresh = false;
-    if (sp.rescue) { CAFE.pop += 1; saveCafe(); } else fresh = storeFish(leap.key, shiny || !!crown);
+    if (sp.rescue) addPop(1); else fresh = storeFish(leap.key, shiny || !!crown);
+    checkTrophies(true);
     show = { boss: false, key: leap.key, name: sp.name, label: sp.label, buff: sp.buff, val, cm, crown, first, record, shiny, img: leap.img, w: leap.w, h: leap.h, sc: leap.sc,
              note: sp.rescue ? '放生  人气+1' : fresh ? '新菜谱：' + DISH[leap.key].name : (shiny || crown ? '高级食材 存入冰箱' : '存入冰箱') };
     if (crown === 'gold' || crown === 'mini') { flash = Math.max(flash, .4); SFX.shiny(); }
@@ -3035,6 +3241,11 @@ function drawDex() {
   if (bd) drawFit(img, 37, y + 20, 44, 34); else g.drawImage(I.skull, 32, y + 15);
   txt(bd ? BOSSES[bk].name : '???', 64, y + 12, 9, '#7a2a1a', 'left', null);
   txt(bd ? '击败 ×' + bd.n : '海怪', 64, y + 27, 7, '#8a5a4a', 'left', null);
+  if (TROPHY[zi]) {
+    const got = CAFE.trophy[zi];
+    g.drawImage(got ? trophyImg(zi) : trophySil(zi), 144, y + 5, 18, 19.5);
+    txt(got ? TROPHY[zi].name : '集齐奖励', 153, y + 32, 6.5, got ? '#7a2a1a' : '#8a5a4a', 'center', null);
+  }
   button(BTN.dexPrev, '◀'); button(BTN.dexNext, '▶');
   txt((zi + 1) + ' / ' + ZONES.length, 90, 279, 8, dark, 'center', null);
 }
