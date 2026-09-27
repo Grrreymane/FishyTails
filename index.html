@@ -704,6 +704,19 @@ const HATS = {
     G.set(11, 5, '#e8453c'); G.set(12, 5, '#4fb0f0'); G.rect(9, 6, 6, 1, '#e0a020');
   },
 };
+// Whiskers for a front-facing cat face, painted after the outline pass so they stay 1px thin.
+// Two per side start just outside the muzzle (half-width mw, row my); pixels inside the head (up to headR) are pale,
+// the tips poking past the cheek are dark so they read on any background. The outer pixel of each tilts up / down.
+const whiskerCols = f => { const l = parseInt(f.O.slice(1, 3), 16) + parseInt(f.O.slice(3, 5), 16) + parseInt(f.O.slice(5, 7), 16); return [l > 600 ? '#a89890' : '#fff4e4', '#6e5a50']; };
+function addWhiskers(c, f, cx, my, mw, headR, ext) {
+  const x = c.getContext('2d'), [face, tip] = whiskerCols(f), rs = Math.floor(cx + mw + .5);
+  for (let k = 0; k < ext; k++) {
+    const xr = rs + k, tilt = k === ext - 1 && ext >= 4 ? 1 : 0;
+    x.fillStyle = xr <= headR ? face : tip;
+    for (const xx of [xr, 2 * cx - 1 - xr]) { x.fillRect(xx, my - tilt, 1, 1); x.fillRect(xx, my + 1 + tilt, 1, 1); }
+  }
+  return c;
+}
 // Cat angler, upper body only (the boat rim hides row 22 down). Paw holding the rod is at (20,15).
 function catSpr(face, furId, hatId) {
   const f = FUR[furId] || FUR.orange;
@@ -1043,6 +1056,9 @@ const guestImg = l => art('guest' + l.size + l.kind + l.cloth + l.acc, () => gue
 // ---------- chef cat: standing behind the stove in a toque and whites, spatula raised
 function chefSpr(face, furId, frame) {
   const f = FUR[furId] || FUR.orange;
+  return addWhiskers(chefPaint(face, f, frame), f, 13, 15, 2.4, 18, 5);
+}
+function chefPaint(face, f, frame) {
   return paint(26, 34, G => {
     G.rect(7, 19, 12, 15, '#f4f4f4'); G.rect(7, 19, 1, 15, '#d8dde6');
     [[11, 22], [11, 26], [15, 22], [15, 26]].forEach(([x, y]) => G.set(x, y, '#b8c4d0'));
@@ -1198,9 +1214,14 @@ function updCafe(dt) {
 // ---------- full-body cat guests (walk frames 1/2, stand 0)
 function guestBodySpr(l, frame) {
   const big = l.size === 'l', f = big ? BIG[l.kind] : FUR[l.kind];
-  const D = { s: { w: 16, h: 22, cx: 8, cy: 6.5, rx: 5, ry: 4.4, bx: 4.5, by: 14.5, bry: 3.6, legY: 17, legH: 4, lw: 2 },
-              m: { w: 18, h: 27, cx: 9, cy: 7.5, rx: 5.6, ry: 4.8, bx: 5.3, by: 17, bry: 4.8, legY: 21, legH: 5, lw: 2 },
-              l: { w: 24, h: 35, cx: 12, cy: 10, rx: 7.3, ry: 6.3, bx: 7.2, by: 23, bry: 6.2, legY: 28, legH: 6, lw: 3 } }[l.size];
+  const c = guestBodyPaint(l, frame, big, f), D = GUEST_DIM[l.size], mw = big ? 3.2 : 2.1, headR = Math.floor(D.cx + D.rx - .5);
+  return addWhiskers(c, f, D.cx, R(D.cy + D.ry * .55), mw, headR, headR + 3 - Math.floor(D.cx + mw + .5));
+}
+const GUEST_DIM = { s: { w: 16, h: 22, cx: 8, cy: 6.5, rx: 5, ry: 4.4, bx: 4.5, by: 14.5, bry: 3.6, legY: 17, legH: 4, lw: 2 },
+                    m: { w: 18, h: 27, cx: 9, cy: 7.5, rx: 5.6, ry: 4.8, bx: 5.3, by: 17, bry: 4.8, legY: 21, legH: 5, lw: 2 },
+                    l: { w: 24, h: 35, cx: 12, cy: 10, rx: 7.3, ry: 6.3, bx: 7.2, by: 23, bry: 6.2, legY: 28, legH: 6, lw: 3 } };
+function guestBodyPaint(l, frame, big, f) {
+  const D = GUEST_DIM[l.size];
   return paint(D.w + 4, D.h, G => {
     const cx = D.cx, cy = D.cy, rx = D.rx, ry = D.ry;
     for (let k = 0; k < 7; k++) G.set(R(cx + D.bx - 1 + Math.min(k, 3) * .8), R(D.by + 1 - k), k > 4 ? f.D : f.O);
@@ -1270,14 +1291,14 @@ function drawChair(sx, sy) {
   diamondC(sx, sy - 6, 8, 4, mixHex('#8a5428', OUT, .6)); diamondC(sx, sy - 7, 7, 3.5, '#8a5428'); diamondC(sx, sy - 8, 6, 3, '#c0392b'); diamondC(sx - 1, sy - 9, 3, 1.5, '#e05a50');
 }
 function softShadow(x, y, hw) { g.globalAlpha = .2; diamondC(x, y, R(hw), Math.max(1, R(hw / 2)), '#2a1a10'); g.globalAlpha = 1; }
-const napCat = () => art('napcat', () => paint(24, 16, G => {
+const napCat = () => art('napcat', () => ((c, x = c.getContext('2d')) => { x.fillStyle = '#6e5a50'; [[21, 8], [22, 7], [21, 9], [22, 10]].forEach(([i, j]) => x.fillRect(i, j, 1, 1)); return c; })(paint(24, 16, G => {
   G.ell(12, 12, 11, 3.5, '#c0392b'); G.ell(12, 11, 10, 2.8, '#e05a50');
   G.ell(12, 8.5, 7, 4, '#f5a04a'); G.ell(17, 7.5, 3.5, 3, '#f5a04a');
   G.tri(15, 5.5, 17, 5, 15.5, 2.5, '#f5a04a'); G.tri(18, 5, 20, 5.5, 19.5, 2.5, '#f5a04a');
   G.set(16, 8, OUT); G.set(17, 8, OUT); G.set(19, 8, OUT);
   for (let k = 0; k < 6; k++) G.set(5 + k, 11 - (k > 3 ? 1 : 0), k % 2 ? '#d97a2a' : '#f5a04a');
   G.set(10, 6, '#d97a2a'); G.set(12, 6, '#d97a2a'); G.set(8, 7, '#d97a2a');
-}));
+}, true)));
 const hsh = (a, b) => ((a * 73856093) ^ (b * 19349663)) >>> 0;
 function wallColor(wall, x, rel) {
   const hw = ISO.wh;
