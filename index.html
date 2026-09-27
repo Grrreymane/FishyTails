@@ -424,107 +424,206 @@ const ZONES = [
 ];
 ZONES.forEach((z, i) => z.fish.forEach(k => { SP[k].zone = i; }));
 
+// ---- boss painting kit: lit colour ramps with ordered dither, rayed fins, glossy eyes
+const DITHER = [[0, .5], [.75, .25]];
+const noise2 = (x, y, s = 0) => { let h = Math.imul(x + 101, 374761393) ^ Math.imul(y + 57, 668265263) ^ Math.imul(s + 7, 982451653); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+// colour picker for a rounded body lit from above: pal runs dark -> light, belly takes over below `bl`
+function lit(pal, cx, cy, rx, ry, o = {}) {
+  const lx = o.lx === undefined ? .2 : o.lx, bl = o.bl === undefined ? .4 : o.bl, base = o.base === undefined ? .6 : o.base;
+  return (x, y) => {
+    const nx = (x + .5 - cx) / rx, ny = (y + .5 - cy) / ry, rr = nx * nx + ny * ny;
+    const p = o.belly && ny > bl ? o.belly : pal;
+    const v = base - ny * .5 + nx * lx - Math.max(0, rr - .65) * .7 + (DITHER[y & 1][x & 1] - .375) * .09;
+    return p[clamp(Math.floor(v * p.length), 0, p.length - 1)];
+  };
+}
+function fillLit(G, key, fn) { G.map((x, y, c) => c === key ? fn(x, y) : c); }
+function gLine(G, x0, y0, x1, y1, c, only) {
+  const n = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0))));
+  for (let i = 0; i <= n; i++) { const x = R(x0 + (x1 - x0) * i / n), y = R(y0 + (y1 - y0) * i / n); if (!only || G.get(x, y)) G.set(x, y, c); }
+}
+function gThick(G, x0, y0, x1, y1, w, c) { for (let dy = 0; dy < w; dy++) for (let dx = 0; dx < w; dx++) gLine(G, x0 + dx, y0 + dy, x1 + dx, y1 + dy, c); }
+function gDel(G, x, y) { if (x >= 0 && y >= 0 && x < G.w && y < G.h) G.d[y * G.w + x] = null; }
+// fin: a = root, b-c = outer edge; pal = [ray, membrane, edge]
+function finG(G, ax, ay, bx, by, cx, cy, pal, n = 3) {
+  G.tri(ax, ay, bx, by, cx, cy, pal[1]);
+  gLine(G, bx, by, cx, cy, pal[2], true);
+  for (let i = 1; i <= n; i++) { const t = i / (n + 1); gLine(G, ax, ay, bx + (cx - bx) * t, by + (cy - by) * t, pal[0], true); }
+}
+function eyeG(G, x, y, r, iris, pupil = 'round') {
+  G.ell(x, y, r + 1, r + 1, OUT);
+  G.ell(x, y, r, r, (px, py) => py + .5 > y + r * .25 ? shade(iris, -34) : iris);
+  if (pupil === 'slit') G.rect(R(x - .5), R(y - r * .7), 1, Math.max(2, R(r * 1.4)), OUT);
+  else if (pupil === 'bar') G.rect(R(x - r * .6), R(y - .5), Math.max(2, R(r * 1.2)), 1, OUT);
+  else if (pupil === 'round') G.ell(x + .3, y + .2, Math.max(.8, r * .45), Math.max(.8, r * .5), OUT);
+  const hx = R(x - r * .5), hy = R(y - r * .5);
+  G.set(hx, hy, '#ffffff'); if (r >= 3) { G.set(hx + 1, hy, '#ffffff'); G.set(hx, hy + 1, '#ffffff'); }
+}
 const SPRB = {
   puffer: makeSpr(paint(42, 34, G => {
-    G.tri(8, 17, 1, 9, 1, 25, '#e0b050');
-    G.tri(18, 5, 26, 5, 20, 1, '#e0b050');
-    G.ell(22, 17, 15, 13, (x, y) => y > 21 ? '#fff1c4' : '#f2d27a');
-    [[14, 10], [20, 8], [26, 10], [12, 15], [18, 13], [24, 14], [30, 9]].forEach(([x, y]) => G.set(x, y, '#c89a44'));
-    G.ell(31, 13, 3.5, 3.5, '#ffffff'); G.rect(32, 12, 2, 3, OUT);
-    G.ell(24, 22, 3, 2, '#f0c060');
-    G.rect(36, 18, 2, 2, '#d4705a');
+    const Y = ['#b07a22', '#d49e3a', '#ecc462', '#f8dc8a', '#fff0b8'], C = ['#ecd8a0', '#f8eac0', '#fff8e0'], F = ['#b8842a', '#e0b050', '#f6d882'];
+    finG(G, 10, 17, 1, 8, 1, 26, F, 4);
+    finG(G, 22, 7, 15, 1, 27, 2, F, 2);
+    finG(G, 21, 27, 16, 33, 25, 32, F, 2);
+    G.ell(22, 17, 15, 13, '#fe0001'); fillLit(G, '#fe0001', lit(Y, 22, 17, 15, 13, { belly: C, bl: .3 }));
+    for (let a = -2.8; a < .9; a += .3) G.set(R(22 + Math.cos(a) * 15.4 - .5), R(17 + Math.sin(a) * 13.4 - .5), '#c08a2a');
+    [[12, 10], [17, 7], [23, 7], [28, 8], [9, 15], [14, 12], [20, 11], [24, 14], [13, 18], [18, 16]].forEach(([x, y]) => { G.rect(x, y, 2, 2, '#9a6420'); G.set(x, y, '#c08a36'); });
+    finG(G, 25, 20, 30, 24, 27, 26, F, 2);
+    G.ell(31, 21, 2.2, 1.3, '#f2a27a');
+    eyeG(G, 31, 13, 3.4, '#3aa06a');
+    G.ell(37.5, 19, 1.8, 2, '#e0785e'); G.set(38, 19, '#7a2a22');
   })),
   pufferBig: makeSpr(paint(58, 58, G => {
-    const cx = 29, cy = 29, r = 21;
-    for (let i = 0; i < 18; i++) {
-      const a = i / 18 * Math.PI * 2, bx = cx + Math.cos(a) * r * .95, by = cy + Math.sin(a) * r * .95;
-      const tx = cx + Math.cos(a) * (r + 5), ty = cy + Math.sin(a) * (r + 5), px = -Math.sin(a) * 2.2, py = Math.cos(a) * 2.2;
-      G.tri(bx + px, by + py, bx - px, by - py, tx, ty, '#e0b050');
+    const cx = 29, cy = 29, r = 21, Y = ['#b07a22', '#d49e3a', '#ecc462', '#f8dc8a', '#fff0b8'], C = ['#ecd8a0', '#f8eac0', '#fff8e0'];
+    for (let i = 0; i < 22; i++) {
+      const a = i / 22 * Math.PI * 2 + .1, co = Math.cos(a), si = Math.sin(a), tx = cx + co * (r + 6.5), ty = cy + si * (r + 6.5);
+      const bx = cx + co * r * .9, by = cy + si * r * .9, px = -si * 2.4, py = co * 2.4;
+      G.tri(bx + px, by + py, bx - px, by - py, tx, ty, '#c8902c');
+      const mx = cx + co * (r + 3), my = cy + si * (r + 3), qx = -si * 1.1, qy = co * 1.1;
+      G.tri(mx + qx, my + qy, mx - qx, my - qy, tx, ty, '#f8e0a0');
     }
-    G.ell(cx, cy, r, r, (x, y) => y > cy + 5 ? '#fff1c4' : '#f2d27a');
-    [[20, 16], [27, 12], [34, 15], [17, 24], [24, 21], [31, 22]].forEach(([x, y]) => { G.set(x, y, '#c89a44'); G.set(x + 1, y, '#c89a44'); });
-    G.ell(39, 22, 4, 4, '#ffffff'); G.rect(40, 21, 2, 3, OUT);
-    for (let i = 0; i < 9; i++) { G.set(34 + i, 15 + Math.floor(i / 3), OUT); G.set(34 + i, 16 + Math.floor(i / 3), OUT); }
-    G.ell(47, 31, 2.5, 2.2, '#d4705a'); G.set(47, 31, OUT);
+    G.ell(cx, cy, r, r, '#fe0001'); fillLit(G, '#fe0001', lit(Y, cx, cy, r, r, { belly: C, bl: .25 }));
+    [[18, 14], [25, 10], [32, 11], [14, 21], [21, 18], [28, 17], [12, 28], [19, 25], [26, 23]].forEach(([x, y]) => { G.rect(x, y, 2, 2, '#9a6420'); G.set(x, y, '#c08a36'); });
+    eyeG(G, 39, 22, 4.2, '#3aa06a');
+    gLine(G, 33, 15, 44, 18, OUT); gLine(G, 33, 16, 44, 19, OUT);
+    G.ell(40, 30, 3, 1.6, '#f2a27a');
+    finG(G, 30, 38, 36, 44, 32, 46, ['#b8842a', '#e0b050', '#f6d882'], 2);
+    G.ell(48.5, 31, 3.2, 3.4, '#e0785e'); G.ell(49, 31.2, 1.8, 2.2, '#5a1a22');
   })),
   squid: makeSpr(paint(36, 42, G => {
-    G.tri(18, 1, 5, 24, 31, 24, '#e05a50');
-    G.tri(9, 8, 1, 16, 9, 19, '#c94a42'); G.tri(27, 8, 35, 16, 27, 19, '#c94a42');
-    G.ell(18, 27, 13, 12, '#e05a50');
-    G.map((x, y, c) => c === '#e05a50' ? ((x * 7 + y * 11) % 13 === 0 ? '#b53b3b' : (x > 9 && x < 15 && y > 6 && y < 20 ? '#f07a6e' : c)) : c);
-    G.ell(12, 29, 4, 4.5, '#ffe07a'); G.ell(24, 29, 4, 4.5, '#ffe07a'); G.rect(12, 28, 2, 3, OUT); G.rect(24, 28, 2, 3, OUT);
+    const Rd = ['#86222c', '#ac3438', '#d04a46', '#ea6c5e', '#fb9480'], F = ['#8a2630', '#c0403e', '#f07e6a'];
+    for (const m of [x => x, x => 36 - x]) {
+      G.tri(m(10), 6, m(0), 16, m(10), 21, F[1]);
+      gLine(G, m(10), 6, m(.5), 16, F[2], true); gLine(G, m(.5), 16, m(10), 21, F[2], true);
+      for (const [ex, ey] of [[2, 12], [1, 16], [4, 19]]) gLine(G, m(9), 13, m(ex), ey, F[0], true);
+    }
+    G.ell(18, 29, 13, 11, '#fe0002'); fillLit(G, '#fe0002', lit(Rd, 18, 29, 13, 11, { lx: 0, base: .5 }));
+    G.tri(18, 0, 5, 25, 31, 25, '#fe0001'); fillLit(G, '#fe0001', lit(Rd, 18, 12, 12, 14, { lx: 0 }));
+    G.map((x, y, c) => Rd.includes(c) ? (noise2(x, y, 3) < .07 ? Rd[0] : noise2(x, y, 4) < .04 ? '#ffc0a8' : c) : c);
+    gLine(G, 18, 3, 18, 21, '#fb9480', true);
+    gLine(G, 6, 24, 30, 24, '#fb9480', true); gLine(G, 6, 25, 30, 25, Rd[0], true);
+    eyeG(G, 11.5, 30, 3.8, '#ffd84a', 'bar'); eyeG(G, 24.5, 30, 3.8, '#ffd84a', 'bar');
+    G.rect(16, 36, 4, 2, Rd[1]); G.set(17, 36, Rd[3]);
   })),
   crab: makeSpr(paint(58, 42, G => {
-    const S = '#6fb8e0', D = '#3f88b8', L = '#a8dcf4';
+    const S = ['#285e8c', '#3a7eb0', '#5aa4d4', '#86c6ec', '#bfe6fa'], T = '#1e4a70';
+    // left legs, arm and claw; mirrored to the right below
     for (let i = 0; i < 3; i++) {
-      G.tri(16 - i * 3, 27 + i * 2, 19 - i * 3, 29 + i * 2, 4 - i, 36 + i * 2, D);
-      G.tri(42 + i * 3, 27 + i * 2, 39 + i * 3, 29 + i * 2, 54 + i, 36 + i * 2, D);
+      const hx = 18 - i * 3, hy = 30 + i * 1.5, kx = 9 - i * 3, ky = 26 + i * 2.5, tx = 5 - i * 2, ty = 37 + i * 1.5;
+      gThick(G, hx, hy, kx, ky, 2, S[2]); gThick(G, kx, ky, tx, ty, 2, S[1]);
+      G.set(R(kx), R(ky), S[4]); G.set(R(tx), R(ty) + 1, T);
     }
-    G.tri(15, 24, 19, 27, 8, 13, S); G.tri(43, 24, 39, 27, 50, 13, S);
-    G.ell(8, 9, 6, 5.5, S); G.ell(50, 9, 6, 5.5, S);
-    for (let i = 0; i < 5; i++) { G.set(3 + i, 4 + Math.floor(i * .7), D); G.set(54 - i, 4 + Math.floor(i * .7), D); }
-    G.ell(29, 27, 17, 11, (x, y) => y < 24 ? L : S);
-    G.map((x, y, c) => c === S && (x * 5 + y * 3) % 17 === 0 ? D : c);
-    G.tri(15, 21, 20, 20, 16, 13, '#e8f8ff'); G.tri(38, 20, 43, 21, 42, 13, '#e8f8ff'); G.tri(27, 17, 31, 17, 29, 10, '#e8f8ff');
-    G.rect(24, 13, 1, 4, D); G.rect(34, 13, 1, 4, D);
-    G.ell(24.5, 12, 2.2, 2.2, '#ffffff'); G.ell(34.5, 12, 2.2, 2.2, '#ffffff'); G.set(24, 12, OUT); G.set(34, 12, OUT);
-    G.rect(26, 31, 7, 1, D); G.set(25, 30, D); G.set(33, 30, D);
+    gThick(G, 16, 24, 10, 16, 3, S[2]);
+    G.ell(9, 12, 6, 5, '#fe0003'); G.tri(4, 9, 9, 8, 3, 0, '#fe0003'); G.tri(9, 8, 14, 9, 12, 1, '#fe0003');
+    fillLit(G, '#fe0003', lit(S, 9, 9, 7, 8));
+    G.map((x, y, c) => y <= 2 && x < 16 ? T : c);
+    G.set(6, 10, S[4]); G.set(7, 9, S[4]); G.set(11, 6, S[4]);
+    for (let y = 0; y < 42; y++) for (let x = 0; x < 29; x++) { const c = G.get(x, y); if (c) G.set(57 - x, y, c); }
+    G.ell(29, 27, 17, 11, '#fe0004'); fillLit(G, '#fe0004', lit(S, 29, 25, 17, 12, { lx: 0 }));
+    for (const [x0, y0, x1, y1, x2, y2] of [[14, 22, 19, 20, 13, 15], [44, 22, 39, 20, 45, 15], [27, 17, 31, 17, 29, 11]]) { G.tri(x0, y0, x1, y1, x2, y2, S[3]); G.set(R(x2), R(y2) + 1, S[4]); }
+    [[20, 20], [25, 19], [32, 19], [37, 20], [22, 25], [35, 25], [28, 23], [18, 28], [39, 28]].forEach(([x, y]) => { G.set(x, y, S[4]); G.set(x + 1, y + 1, S[1]); });
+    G.rect(24, 12, 1, 5, S[2]); G.rect(33, 12, 1, 5, S[2]);
+    eyeG(G, 24.5, 11, 2.2, '#20202e', 'none'); eyeG(G, 33.5, 11, 2.2, '#20202e', 'none');
+    G.rect(25, 30, 8, 3, S[0]); G.rect(26, 30, 6, 1, S[1]); G.set(28, 31, S[2]); G.set(29, 31, S[2]);
   })),
   ghost: makeSpr(paint(66, 28, G => {
-    const A = '#bfe8e0', D = '#8ac8c0', Bl = '#eafff8';
-    G.tri(14, 14, 1, 2, 6, 14, D); G.tri(14, 14, 6, 14, 2, 25, D);
-    G.tri(28, 9, 40, 9, 31, 1, D);
-    G.tri(34, 19, 42, 19, 31, 26, D);
-    G.ell(37, 14, 24, 7.5, (x, y) => y > 16 ? Bl : A);
-    for (const x of [47, 49, 51]) G.rect(x, 11, 1, 4, D);
-    G.ell(54, 11, 1.8, 1.8, '#7fffd4'); G.set(54, 11, '#ffffff');
-    G.rect(51, 17, 9, 1, OUT); for (let x = 52; x < 60; x += 2) G.set(x, 18, '#ffffff');
+    const A = ['#5e9c9c', '#7cbcb6', '#a2dcd4', '#c8f2ea', '#eafffa'], Bl = ['#d0f4ec', '#eafff8', '#f8fffc'], F = ['#5e9c9c', '#8ac8c0', '#c8f2ea'];
+    finG(G, 15, 14, 1, 1, 8, 13, F, 3); finG(G, 15, 14, 8, 15, 2, 26, F, 3);
+    finG(G, 37, 10, 31, 0, 27, 9, F, 3);
+    finG(G, 27, 19, 21, 24, 25, 24, F, 1);
+    G.ell(37, 14, 24, 7.5, '#fe0005'); fillLit(G, '#fe0005', lit(A, 37, 14, 24, 7.5, { belly: Bl, bl: .25, lx: .25 }));
+    gLine(G, 16, 13, 53, 12, '#eafffa', true);
+    for (let x = 24; x <= 44; x += 4) { gLine(G, x, 12, x - 2, 9, '#e4fff8', true); gLine(G, x, 13, x - 2, 16, '#e4fff8', true); }
+    for (const x of [46, 48, 50]) gLine(G, x, 10, x - 1, 16, A[0], true);
+    finG(G, 41, 18, 33, 26, 38, 25, F, 2);
+    G.ell(54, 11, 2.4, 2.4, '#2ad8b0'); G.ell(54, 11, 1.4, 1.4, '#7fffd4'); G.set(54, 11, '#ffffff');
+    G.rect(51, 17, 10, 2, '#1e3434'); [52, 54, 56, 58].forEach(x => G.set(x, 17, '#ffffff')); [53, 55, 57].forEach(x => G.set(x, 18, '#ffffff'));
+    for (let y = 0; y < 28; y++) for (let x = 0; x < 9; x++) if ((x + y) % 2 && noise2(x, y, 9) < (9 - x) / 10) gDel(G, x, y);
   })),
   serpent: makeSpr(paint(34, 24, G => {
-    const Dk = '#6a3e3a', Md = '#8a5448', Cr = '#ffb03a';
-    G.tri(8, 7, 13, 8, 6, .5, '#8a6a5a'); G.tri(12, 7, 16, 8, 12, 1, '#8a6a5a');
-    G.ell(13, 13, 10, 8, (x, y) => y > 15 ? Md : Dk);
-    G.ell(24, 15, 8, 5.5, (x, y) => y > 16 ? Md : Dk);
-    [[7, 10], [8, 11], [11, 9], [15, 12], [16, 13], [22, 12], [10, 16], [5, 14]].forEach(p => G.set(p[0], p[1], Cr));
-    G.ell(20, 11, 2.4, 2, '#ffe14a'); G.rect(20, 10, 1, 3, OUT);
-    G.rect(23, 18, 9, 1, OUT); G.set(25, 17, '#ffffff'); G.set(28, 17, '#ffffff'); G.set(30, 17, '#ffffff');
-    G.set(31, 13, Cr);
+    const Dk = ['#3a1e22', '#52282c', '#6e3a38', '#8c5044', '#aa6a52'], Bel = ['#b8764e', '#d4955e', '#eab478'], H = ['#5a4038', '#9a8070', '#d0baa8'];
+    for (let i = 0; i < 4; i++) { G.tri(6, 8 + i * 3, 6, 11.5 + i * 3, 0, 9.5 + i * 3, i % 2 ? '#b8441e' : '#e0702e'); G.set(1, R(9.5 + i * 3), '#ffb03a'); }
+    const horn = (x0, y0, x1, y1) => { for (let i = 0; i <= 8; i++) { const t = i / 8, x = R(x0 + (x1 - x0) * t), y = R(y0 + (y1 - y0) * t), c = i === 8 ? H[2] : i % 3 === 0 ? H[0] : H[1]; G.set(x, y, c); if (i < 6) G.set(x + 1, y, c); } };
+    horn(10, 8, 3, 1); horn(14, 7, 9, 0);
+    G.ell(13, 13, 10, 8, '#fe0006'); G.ell(24, 14.5, 9, 5.5, '#fe0006');
+    fillLit(G, '#fe0006', lit(Dk, 17, 12, 16, 9, { belly: Bel, bl: .45, lx: .15 }));
+    G.map((x, y, c) => Dk.includes(c) && y % 2 === 0 && (x + ((y >> 1) & 1) * 2) % 4 === 0 ? shade(c, -16) : c);
+    const crack = pts => pts.slice(1).forEach((p, i) => gLine(G, pts[i][0], pts[i][1], p[0], p[1], '#ff7a2a', true));
+    crack([[5, 12], [8, 13], [10, 11], [13, 12], [15, 10]]); crack([[7, 17], [10, 16], [12, 18]]);
+    [[8, 13], [13, 12], [10, 16]].forEach(([x, y]) => G.set(x, y, '#ffe14a'));
+    eyeG(G, 20, 11.5, 2.2, '#ffc83a', 'slit');
+    gLine(G, 16, 8, 23, 9, Dk[0]); gLine(G, 17, 9, 23, 10, Dk[1], true);
+    G.set(30, 12, OUT); G.set(31, 11, Dk[4]);
+    gLine(G, 21, 18, 33, 18, OUT);
+    [24, 28, 31].forEach(x => G.set(x, 18, '#fff4e0')); G.rect(26, 18, 1, 2, '#fff4e0');
   })),
   guardian: makeSpr(paint(60, 36, G => {
-    G.tri(12, 18, 1, 6, 1, 30, '#7a808a');
-    G.tri(24, 7, 40, 7, 28, 1, '#7a808a'); G.tri(28, 29, 38, 29, 26, 35, '#7a808a');
-    G.ell(33, 18, 24, 12, (x, y) => ((x * 7 + y * 5) % 11 === 0) ? '#6a707a' : (y > 23 ? '#a8aeb8' : '#b8bec8'));
-    [[20, 14, 2, 6], [30, 12, 6, 2], [42, 16, 2, 6], [26, 22, 5, 2]].forEach(([x, y, w, h]) => G.rect(x, y, w, h, '#5ff2d0'));
-    for (let i = 0; i < 6; i++) G.set(36 + i, 8 + (i >> 1), '#5a6068');
-    G.ell(50, 14, 2.6, 2.6, '#5ff2d0'); G.set(50, 14, '#ffffff');
-    G.rect(49, 22, 9, 1, OUT);
+    const St = ['#565c68', '#6e7582', '#8a929e', '#a8b0ba', '#c6ccd4'], Bel = ['#9aa2ac', '#b4bcc4', '#ccd2d8'], F = ['#5a606c', '#7a808c', '#a0a8b2'], GL = '#5ff2d0';
+    finG(G, 13, 18, 1, 5, 1, 31, F, 4);
+    G.tri(22, 9, 42, 9, 27, 0, F[1]); for (const x of [26, 30, 34, 38]) gLine(G, x, 9, x - 2, 1, F[0], true);
+    [[27, 0], [26, 2], [33, 4], [37, 6]].forEach(([x, y]) => gDel(G, x, y));
+    finG(G, 30, 28, 26, 35, 36, 33, F, 2);
+    G.ell(33, 18, 24, 12, '#fe0007'); G.ell(53, 19, 6.5, 5.5, '#fe0007');
+    fillLit(G, '#fe0007', lit(St, 36, 18, 26, 12, { belly: Bel, bl: .45, lx: .15 }));
+    for (const sx of [19, 27, 35, 44]) for (let y = 4; y < 32; y++) { const x = sx + R((y - 18) * (y - 18) / 40); if (G.get(x, y) && G.get(x + 2, y)) { G.set(x, y, St[0]); G.set(x + 1, y, St[4]); } }
+    [[23, 12, 25, 15], [25, 15, 24, 18], [39, 21, 41, 24], [31, 8, 32, 11]].forEach(([a, b, c, d]) => gLine(G, a, b, c, d, St[0], true));
+    for (let x = 14; x < 50; x++) { const t = (x + .5 - 33) / 24; if (Math.abs(t) >= 1) continue; const y0 = Math.ceil(18 - 12 * Math.sqrt(1 - t * t) - .5); if (noise2(x, 1) < .55) { G.set(x, y0, '#6aa05a'); if (noise2(x, 2) < .35) G.set(x, y0 + 1, '#4a7a44'); } }
+    const rune = (ox, oy, pts) => pts.forEach(([x, y]) => G.set(ox + x, oy + y, GL));
+    rune(22, 15, [[0, 0], [0, 1], [0, 2], [1, 1], [2, 0], [2, 2]]); rune(30, 13, [[1, 0], [0, 1], [2, 1], [1, 2], [1, 1]]);
+    rune(38, 15, [[0, 0], [1, 0], [2, 0], [1, 1], [1, 2]]); rune(28, 21, [[0, 0], [0, 1], [1, 1], [2, 1], [2, 2]]);
+    G.ell(50, 14, 3, 3, '#2a9a82'); G.ell(50, 14, 2, 2, GL); G.set(50, 14, '#ffffff'); G.set(49, 13, '#dffff6');
+    gLine(G, 46, 10, 54, 11, St[0], true); gLine(G, 46, 9, 54, 10, St[4], true);
+    gLine(G, 47, 22, 59, 22, OUT); [49, 52, 55].forEach(x => { G.set(x, 23, '#dde2e8'); G.set(x + 1, 23, '#dde2e8'); });
   })),
   starwhale: makeSpr(paint(80, 36, G => {
-    G.tri(12, 17, 1, 5, 4, 17, '#2a3a7a'); G.tri(12, 17, 4, 17, 1, 29, '#2a3a7a');
-    G.tri(34, 6, 42, 6, 36, 1, '#223066');
-    G.ell(44, 18, 34, 13, (x, y) => y > 23 ? ((y % 2) ? '#c8d4f0' : '#dfe8ff') : ((x * 11 + y * 7) % 17 === 0 ? '#fff6c0' : '#2a3a7a'));
-    G.tri(44, 25, 54, 25, 46, 33, '#223066');
-    G.set(68, 15, '#ffffff'); G.set(69, 15, OUT);
-    G.rect(64, 21, 12, 1, OUT);
+    const N = ['#121a40', '#1a2556', '#24336e', '#304488', '#4058a4'], Bel = ['#8e9cc8', '#b4c2e6', '#dae4fa'], F = ['#141c44', '#223066', '#3a4e96'];
+    finG(G, 13, 17, 1, 2, 6, 17, F, 3); finG(G, 13, 17, 6, 17, 2, 29, F, 2);
+    finG(G, 41, 7, 35, 0, 31, 7, F, 2); finG(G, 21, 12, 18, 7, 16, 12, F, 1);
+    G.ell(44, 18, 34, 13, '#fe0008'); fillLit(G, '#fe0008', lit(N, 44, 18, 34, 13, { belly: Bel, bl: .35, lx: .1 }));
+    G.map((x, y, c) => N.includes(c) && Math.sin(x * .12 + y * .35) + Math.sin(x * .05 - y * .2) > 1.3 ? (c === N[0] || c === N[1] ? '#2a2268' : '#3c3288') : c);
+    for (const y of [26, 28, 30]) gLine(G, 48, y, 74, y - 3, '#6e7cb0', true);
+    G.map((x, y, c) => c !== '#6e7cb0' && !Bel.includes(c) && noise2(x, y, 7) < .035 ? '#fff6c0' : c);
+    [[30, 10], [48, 8], [58, 11], [40, 14], [24, 14], [66, 11], [52, 15], [35, 18]].forEach(([x, y]) => { for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) G.set(x + dx, y + dy, '#a8c0ff'); G.set(x, y, '#ffffff'); });
+    finG(G, 50, 24, 44, 34, 57, 31, F, 3);
+    for (const x of [57, 59, 61]) gLine(G, x, 13, x - 1, 20, N[0], true);
+    G.rect(68, 15, 2, 2, OUT); G.set(68, 15, '#ffffff');
+    gLine(G, 63, 21, 78, 21, OUT); gLine(G, 64, 22, 77, 22, Bel[2], true);
   })),
   dragon: makeSpr(paint(42, 32, G => {
-    const R1 = '#c0392b', R2 = '#e05a40', GO = '#ffd23f';
-    G.tri(8, 9, 14, 10, 6, 1, GO); G.tri(13, 8, 18, 9, 14, 1, GO);
-    [[3, 14], [2, 18], [3, 22]].forEach(([x, y]) => G.tri(x + 3, y - 1, x + 3, y + 2, x - 2, y, '#3ed6b0'));
-    G.ell(15, 16, 11, 9, (x, y) => y > 19 ? R2 : R1);
-    G.ell(28, 18, 11, 6.5, (x, y) => y > 19 ? GO : R1);
-    [[6, 12], [8, 17], [12, 11], [18, 14], [10, 21]].forEach(p => G.set(p[0], p[1], '#8a2a20'));
-    G.ell(22, 13, 2.8, 2.2, GO); G.rect(22, 12, 1, 3, OUT);
-    G.rect(26, 22, 13, 1, OUT); [28, 31, 34, 37].forEach(x => G.set(x, 21, '#ffffff'));
-    for (let i = 0; i < 8; i++) G.set(36 + (i >> 1), 15 + i, GO);
+    const Rd = ['#6e1418', '#9a2220', '#c0382a', '#dc5638', '#f08050'], Go = ['#a86a0a', '#d89a1a', '#ffd23f', '#fff0a0'], Tl = ['#1e8a74', '#32c0a0', '#8ff0d8'];
+    for (let i = 0; i < 6; i++) { const y = 5 + i * 4, tx = 1 + (i % 2) * 2; G.tri(11, y, 11, y + 5, tx, y - 1, Tl[i % 2]); gLine(G, 10, y + 2, tx + 1, y, Tl[2], true); }
+    gThick(G, 12, 8, 6, 1, 2, Go[1]); gLine(G, 9, 4, 11, 0, Go[1]);
+    gThick(G, 16, 7, 12, 0, 2, Go[2]); gLine(G, 14, 3, 17, 0, Go[2]); gLine(G, 15, 6, 12, 1, Go[3]);
+    G.ell(15, 15, 10, 9, '#fe0009'); G.ell(29, 16.5, 11, 6, '#fe0009'); G.ell(36.5, 14.5, 3.5, 3, '#fe0009');
+    fillLit(G, '#fe0009', lit(Rd, 20, 14, 17, 10, { lx: .2 }));
+    G.map((x, y, c) => Rd.includes(c) && x < 20 && y % 2 === 1 && (x + ((y >> 1) & 1) * 2) % 4 === 0 ? shade(c, -20) : c);
+    G.tri(12, 18, 18, 19, 9, 26, Tl[1]); gLine(G, 12, 19, 10, 24, Tl[0], true);
+    G.tri(22, 20, 41, 18, 41, 26, '#3a0a14');
+    gLine(G, 27, 23, 39, 22, '#e8607a', true); gLine(G, 30, 24, 39, 23, '#e8607a', true);
+    G.ell(29, 26, 10, 3.2, '#fe000a'); fillLit(G, '#fe000a', lit(Go, 29, 25, 10, 4, { lx: 0 }));
+    for (let x = 22; x < 38; x += 3) gLine(G, x, 24, x, 28, Go[0], true);
+    [26, 29, 32, 35].forEach(x => G.set(x, 20, '#fff8e8')); G.rect(38, 19, 1, 3, '#fff8e8'); G.rect(34, 23, 1, 2, '#fff8e8');
+    eyeG(G, 22.5, 12.5, 2.6, '#ffd23f', 'slit');
+    gThick(G, 17, 8, 26, 9, 2, Go[2]); gLine(G, 17, 8, 25, 8, Go[3], true);
+    G.set(38, 13, OUT); G.set(39, 13, OUT);
+    gLine(G, 39, 15, 41, 11, Go[2]); gLine(G, 41, 11, 40, 7, Go[2]); gLine(G, 40, 7, 41, 4, Go[3]);
+    G.tri(24, 28, 30, 28, 26, 32, Tl[1]); G.tri(28, 28, 33, 28, 31, 32, Tl[0]);
   })),
   kraken: makeSpr(paint(88, 60, G => {
-    G.ell(44, 40, 38, 31, (x, y) => { if (y > 57) return null; if ((x - 28) ** 2 + (y - 20) ** 2 < 70) return '#8b5bb3'; if ((x * 13 + y * 7) % 23 === 0) return '#9a6cc4'; return '#6b3d8f'; });
-    G.ell(27, 36, 8, 6.5, '#ffdf4a'); G.ell(61, 36, 8, 6.5, '#ffdf4a');
-    G.rect(26, 31, 2, 11, OUT); G.rect(60, 31, 2, 11, OUT);
-    G.set(23, 33, '#fff8c0'); G.set(57, 33, '#fff8c0');
-    for (let i = 0; i < 11; i++) { const d = Math.floor(i / 3.5); G.set(18 + i, 26 + d, OUT); G.set(18 + i, 27 + d, OUT); G.set(70 - i, 26 + d, OUT); G.set(70 - i, 27 + d, OUT); }
-    G.tri(39, 47, 49, 47, 44, 55, '#2b1d14');
+    const P = ['#321848', '#46226a', '#5e3284', '#7a48a2', '#9a68c0', '#bc92dc'];
+    G.ell(44, 40, 38, 31, (x, y) => y > 57 ? null : '#fe000b'); fillLit(G, '#fe000b', lit(P, 44, 32, 38, 30, { lx: 0, base: .66 }));
+    for (let y = 10; y < 46; y++) for (let x = 8; x < 80; x++) if (G.get(x, y) && noise2(x, y, 11) < .025) { G.rect(x, y, 2, 2, P[1]); G.set(x, y, P[4]); }
+    [[30, 14, 36, 20], [36, 20, 34, 26], [58, 14, 52, 20], [52, 20, 55, 26], [44, 9, 44, 20], [44, 20, 41, 24]].forEach(([a, b, c, d]) => gLine(G, a, b, c, d, P[1], true));
+    for (let x = 8; x < 80; x++) for (let y = 53; y < 58; y++) if (G.get(x, y) && (x % 7 === 0 || y === 57)) G.set(x, y, P[0]);
+    for (const [ex, px] of [[27, 26], [61, 60]]) {
+      G.ell(ex, 36, 10, 8.5, P[1]);
+      G.ell(ex, 36, 8, 6.5, (x, y) => { const d = Math.hypot((x + .5 - ex) / 8, (y + .5 - 36) / 6.5); return d > .8 ? '#d8961c' : y + .5 > 38 ? '#f0c030' : '#ffdf4a'; });
+      for (const a of [.4, 1.3, 2.2, 3.4, 4.3, 5.4]) G.set(R(ex - .5 + Math.cos(a) * 5), R(35.5 + Math.sin(a) * 4), '#d8961c');
+      G.rect(px, 31, 2, 11, OUT); G.rect(ex - 4, 32, 2, 2, '#fffbe0'); G.set(ex + 3, 39, '#fff8c0');
+    }
+    for (let i = 0; i < 11; i++) { const d = Math.floor(i / 3.5); G.set(18 + i, 26 + d, OUT); G.set(18 + i, 27 + d, OUT); G.set(70 - i, 26 + d, OUT); G.set(70 - i, 27 + d, OUT); G.set(18 + i, 25 + d, P[5]); G.set(70 - i, 25 + d, P[5]); }
+    G.ell(44, 49, 8, 4, P[1]);
+    G.tri(38, 46, 50, 46, 44, 56, '#2b1d14'); gLine(G, 40, 47, 44, 54, '#5a4030', true); gLine(G, 39, 50, 49, 50, '#120a06', true);
   })),
 };
 // y0/y1: where the boss sits at 0% and 100% progress. card: sprite + facing used on the catch card and in the dex.
@@ -2536,7 +2635,11 @@ function drawBoss() {
   } else if (b.key === 'serpent') {
     const S = SPRB.serpent, tlx = R(b.x - 17), tly = R(b.y - 12), nx = tlx + 29, ny = tly + 14, segs = [];
     for (let i = 1; i <= 14; i++) segs.push([nx + i * 4.2, ny + i * 2 + Math.sin(T * 2.4 - i * .55) * 5 * Math.min(1, i / 3), Math.max(1.8, 6.5 - i * .32)]);
-    for (let i = segs.length - 1; i >= 0; i--) { const [x, y, r] = segs[i]; disc(x, y, r + 1, OUT); disc(x, y, r, i % 3 === 1 ? '#8a5448' : '#6a3e3a'); if (i % 2 === 0) { g.fillStyle = '#ffb03a'; g.fillRect(R(x), R(y - r * .4), 1, 1); } }
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const [x, y, r] = segs[i]; disc(x, y, r + 1, OUT); disc(x, y, r, '#52282c'); disc(x - r * .15, y - r * .25, r * .75, i % 2 ? '#6e3a38' : '#7a4440'); disc(x - r * .3, y - r * .45, r * .3, '#8c5044');
+      g.fillStyle = '#d4955e'; g.fillRect(R(x - r * .4), R(y + r * .55), Math.max(1, R(r * .8)), 1);
+      if (i % 2 === 0) { g.fillStyle = '#ff7a2a'; g.fillRect(R(x + r * .2), R(y - r * .1), 1, 1); g.fillStyle = '#ffe14a'; g.fillRect(R(x + r * .2), R(y - r * .1) - 1, 1, 1); }
+    }
     top = tly; g.drawImage(img(S, true), tlx, tly);
   } else if (b.key === 'guardian') {
     const S = SPRB.guardian; top = R(b.y - S.h / 2);
@@ -2552,9 +2655,10 @@ function drawBoss() {
     const S = SPRB.dragon, tlx = R(b.x - 21), tly = R(b.y - 16), nx = tlx + 37, ny = tly + 18, segs = [];
     for (let i = 1; i <= 16; i++) segs.push([nx + i * 4.4, ny + i * 1.6 + Math.sin(T * 2.6 - i * .5) * 6 * Math.min(1, i / 3), Math.max(2, 8 - i * .36)]);
     for (let i = segs.length - 1; i >= 0; i--) {
-      const [x, y, r] = segs[i]; disc(x, y, r + 1, OUT); disc(x, y, r, i % 2 ? '#c0392b' : '#a82a22');
-      g.fillStyle = '#ffd23f'; g.fillRect(R(x), R(y + r * .4), 1, 1);
-      if (i % 3 === 0) { g.fillStyle = '#3ed6b0'; g.fillRect(R(x), R(y - r - 2), 1, 2); }
+      const [x, y, r] = segs[i];
+      if (i % 2 === 0) { g.fillStyle = OUT; g.fillRect(R(x) - 1, R(y - r - 4), 3, 4); g.fillStyle = i % 4 ? '#32c0a0' : '#8ff0d8'; g.fillRect(R(x), R(y - r - 3), 1, 3); }
+      disc(x, y, r + 1, OUT); disc(x, y, r, '#9a2220'); disc(x - r * .15, y - r * .25, r * .75, i % 2 ? '#c0382a' : '#b83226'); disc(x - r * .3, y - r * .45, r * .3, '#e0603e');
+      g.fillStyle = '#d89a1a'; g.fillRect(R(x - r * .5), R(y + r * .4), Math.max(1, R(r)), Math.max(1, R(r * .45))); g.fillStyle = '#ffd23f'; g.fillRect(R(x - r * .5), R(y + r * .4), Math.max(1, R(r)), 1);
     }
     top = tly; g.drawImage(img(S, true), tlx, tly);
   } else {
