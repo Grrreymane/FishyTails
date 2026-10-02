@@ -99,7 +99,7 @@ async function check(name, fn, saved) {
     await run('newRun(); go("idle")');
     const box = await page.locator('#c').boundingBox();
     const click = (x, y) => page.mouse.click(box.x + x * box.width / 180, box.y + y * box.height / 320);
-    await click(153, 56); assert.equal(await run('state'), 'shop');
+    await click(107, 8); assert.equal(await run('state'), 'shop');
     await click(157, 33); assert.equal(await run('state'), 'idle');
     await click(172, 30); assert.equal(await run('state'), 'menu');
     await click(90, 188); assert.equal(await run('state'), 'dex');
@@ -112,7 +112,7 @@ async function check(name, fn, saved) {
     await page.screenshot({ path: path.join(root, '.shots/navigation-fight.png') });
     const box = await page.locator('#c').boundingBox();
     const click = (x,y) => page.mouse.click(box.x+x*box.width/180,box.y+y*box.height/320);
-    await click(153,56); assert.equal(await run('state'), 'shop');
+    await click(107,8); assert.equal(await run('state'), 'shop');
     const before = await run('[F.y,F.timer,tension,menuRunTime]');
     const after = await run('update(.05,.05); shopPress({x:157,y:33}); const result=[F.y,F.timer,tension,st]; menuFrom=state;menuRunTime=st;go("menu");render();result');
     assert.deepEqual(after,before);
@@ -150,6 +150,12 @@ async function check(name, fn, saved) {
     await page.screenshot({ path: path.join(root, '.shots/cafe-recipes.png') });
     await run('closeCafe(); newRun(); go("idle"); render()');
     await page.screenshot({ path: path.join(root, '.shots/fishing.png') });
+    await run('go("title"); render()');
+    await page.screenshot({ path: path.join(root, '.shots/title-buttons.png') });
+    await run('go("over"); st=1; render()');
+    await page.screenshot({ path: path.join(root, '.shots/result-failed.png') });
+    await run('go("win"); st=1; render()');
+    await page.screenshot({ path: path.join(root, '.shots/result-win.png') });
   });
   await check('cosmetic catches persist and display automatically without buying a tank', async ({ run, page }) => {
     const result = await run('newRun(); CAFE.variantPity = 11; CAFE.keepsakePity = 3; leap = { key:"sardine", shiny:false, img:SPR.sardine.l, w:SPR.sardine.w, h:SPR.sardine.h, sc:2 }; startShow(); render(); [!!show.variant, show.keepsake, tankSel(2)[0] === CAFE.featureFish, show.val === run.coins, Object.keys(DEX.fish.sardine.variants).length]');
