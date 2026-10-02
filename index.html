@@ -1896,7 +1896,6 @@ function drawCafeUI(eq) {
   txt('魅力 ' + charm(eq), 104, 9, 6.5, '#ffe4a0', 'left');
   button(CAFE_BTN.close, cafe.returnState ? '出海' : '返回');
   panel(4, 21, 60, 16); txt('渔喵小馆', 34, 29, 8, '#7a3b12', 'center', null);
-  panel(112, 21, 64, 16); txt('小馆一直营业中', 144, 29, 6.5, '#7a3b12', 'center', null);
   // bottom bar
   g.fillStyle = '#2a1e14'; g.fillRect(0, 294, W, 26); g.fillStyle = '#4a3424'; g.fillRect(0, 294, W, 1);
   CAFE_TABS.forEach((name, i) => {
@@ -2140,11 +2139,24 @@ const SONGS = {
         chords: [[0, 'm7'], [5, 'm7'], [-2, '7'], [3, 'M7'], [-4, 'M7'], [5, 'm7'], [7, '7'], [0, 'm']],
         mel: [19, _, _, _, 17, _, 15, _,   17, _, _, _, 12, _, _, _,   14, _, 17, _, 20, _, 19, _,   19, _, _, _, _, _, _, _,
               20, _, _, _, 19, _, 15, _,   17, _, 15, _, 12, _, _, _,  14, _, _, _, 11, _, _, _,   12, _, _, _, _, _, _, _] },
-  // 失落遗迹: mysterious D dorian, music box and flute
-  z6: { bpm: 96, root: 62, lead: INST.flute, bass: 'long', comp: 'arp', compInst: INST.box, echo: .35, drums: 'K...w...',
-        chords: [[0, 'm7'], [5, '7'], [0, 'm7'], [7, 'm7'], [-4, 'M7'], [-2, 'M'], [0, 'm7'], [7, '7']],
-        mel: [14, _, 12, _, 9, _, _, _,   17, _, 16, _, 14, _, 12, _,   12, _, 14, _, 17, _, 19, _,   16, _, _, _, _, _, _, _,
-              17, _, 19, _, 21, _, 19, 17,  16, _, 14, _, 12, _, _, _,  14, _, 12, _, 9, _, 7, _,   9, _, _, _, 13, _, _, _] },
+  // 失落遗迹: "Echoes in the Courtyard" — 16 bars in D minor, soft bells and open space.
+  z6: { bpm: 84, root: 62,
+        lead: { vol: .065, att: .012, dec: 1.45, parts: [[1, 1], [2, .12], [3, .025]], echo: true },
+        bass: 'long', bassInst: { vol: .055, att: .12, type: 'sine' },
+        comp: 'arp', compInst: { vol: .035, dec: .85, parts: [[1, 1], [2, .08]], echo: true },
+        compSteps: [0, 3, 4, 6], compOctave: 0, compVelocity: .55, echo: .24, drums: '........',
+        chords: [[0, 'm7'], [-4, 'M7'], [3, 'M7'], [-2, 'M'],
+                 [0, 'm7'], [-4, 'M7'], [5, 'm7'], [0, 'm7'],
+                 [3, 'M7'], [-2, 'M'], [-4, 'M7'], [5, 'm7'],
+                 [0, 'm7'], [-4, 'M7'], [-2, 'M'], [0, 'm7']],
+        mel: [12, _, _, 15, 19, _, 17, _,   15, _, _, _, 12, _, _, _,
+              15, _, _, 19, 22, _, 19, _,   17, _, 14, _, 10, _, _, _,
+              12, _, _, 15, 19, _, 22, _,   20, _, 19, _, 15, _, _, _,
+              17, _, _, 15, 14, _, 10, _,   12, _, _, _, _, _, _, _,
+              19, _, _, 22, 19, _, 15, _,   17, _, _, 14, 10, _, _, _,
+              15, _, _, 19, 20, _, 19, _,   17, _, 14, _, 10, _, _, _,
+              12, _, _, 15, 19, _, 17, _,   15, _, 12, _, 8, _, _, _,
+              10, _, _, 14, 17, _, 14, _,   12, _, _, _, 7, _, _, _] },
   // 星光海: slow and dreamy E major
   z7: { bpm: 72, root: 64, lead: INST.box, bass: 'long', comp: 'arp', compInst: INST.pluck, echo: .45, drums: '........',
         chords: [[0, 'M7'], [-3, 'm7'], [5, 'M7'], [7, '7'], [0, 'M7'], [4, 'm7'], [5, 'M7'], [7, '7']],
@@ -2230,12 +2242,12 @@ function playStep(song, i, t, spb) {
     mnote(B0 + walk[s / 2], t, spb * 2, INST.bass);
   } else if (song.bass === 'root8') mnote(B0 + (s === 2 || s === 6 ? 12 : 0), t, spb, INST.bass, s % 2 ? .75 : 1);
   else if (song.bass === 'waltz' && (s === 0 || s === 3)) mnote(B0 + (s ? 7 : 0), t, spb * 2, INST.bass);
-  else if (song.bass === 'long' && s === 0) mnote(B0 + 12, t, spb * n * .95, INST.bassLong);
+  else if (song.bass === 'long' && s === 0) mnote(B0 + 12, t, spb * n * .95, song.bassInst || INST.bassLong);
   // comping from the chord
   if (song.comp === 'off' && s % 2 === 1) tones.slice(0, 3).forEach(iv => mnote(cr + iv, t, spb, INST.pluck, .8));
   else if (song.comp === 'stab' && s % 2 === 1) tones.slice(0, 3).forEach(iv => mnote(cr + iv, t, spb, INST.stab));
   else if (song.comp === 'waltz' && (s === 2 || s === 5)) tones.slice(0, 3).forEach(iv => mnote(cr + iv, t, spb, INST.pluck, .8));
-  else if (song.comp === 'arp') { const seq = [0, 1, 2, 3, 2, 1, 0, 2], j = seq[s], iv = tones[j % tones.length] + (j >= tones.length ? 12 : 0); mnote(cr + 12 + iv, t, spb * 2, song.compInst || INST.box, .7); }
+  else if (song.comp === 'arp' && (!song.compSteps || song.compSteps.includes(s))) { const seq = [0, 1, 2, 3, 2, 1, 0, 2], j = seq[s], iv = tones[j % tones.length] + (j >= tones.length ? 12 : 0); mnote(cr + (song.compOctave ?? 12) + iv, t, spb * 2, song.compInst || INST.box, song.compVelocity ?? .7); }
   // melody
   const m = song.mel[k];
   if (m !== null) mnote(root + m, t, spb * holdLen(song.mel, k) * .92, song.lead);
@@ -3334,6 +3346,19 @@ function showShare(cvs, msg) {
   el.appendChild(img); el.appendChild(tip); el.appendChild(row);
   document.body.appendChild(el); shareEl = el;
 }
+function cardRewardRow(items, y, size) {
+  const gap = 4, between = 12;
+  const cells = items.map(item => {
+    const text = textSprite({ s: item.label, size, col: item.col, stroke: null });
+    return { ...item, width: item.iconSize + gap + (text.w - 2 * text.pad) / K };
+  });
+  let x = 90 - (cells.reduce((sum, c) => sum + c.width, 0) + between * (cells.length - 1)) / 2;
+  for (const c of cells) {
+    g.drawImage(c.icon, R(x), R(y - c.iconSize / 2), c.iconSize, c.iconSize);
+    txt(c.label, x + c.iconSize + gap, y, size, c.col, 'left', null);
+    x += c.width + between;
+  }
+}
 function drawCard() {
   const sh = show;
   g.globalAlpha = .45; g.fillStyle = '#0a0c1e'; g.fillRect(0, 0, W, H); g.globalAlpha = 1;
@@ -3351,17 +3376,15 @@ function drawCard() {
   if (sh.first) txt('NEW!', 150, py + 12, 9, '#e8453c', 'center', '#fff3d0');
   if (sh.boss) {
     txt('击败 ' + sh.name + '!', 90, py + 14, 12, '#c0392b', 'center', null);
-    g.drawImage(I.heart, 44, 196); txt('生命+1', 56, 201, 10, '#c0392b', 'left', null);
-    g.drawImage(I.coin, 100, 196); txt('+' + sh.val, 111, 201, 10, '#9a6a00', 'left', null);
+    cardRewardRow([{ icon: I.heart, iconSize: 9, label: '生命+1', col: '#c0392b' }, { icon: I.coin, iconSize: 9, label: '+' + sh.val, col: '#9a6a00' }], 201, 10);
   } else {
     txt(sh.name, 90, py + 13, 11, dark, 'center', null);
     const sizeLine = sh.cm + ' cm' + (sh.crown ? '  ' + CROWN_NAME[sh.crown] : '') + (sh.record ? '  新纪录!' : '');
     txt(sizeLine, 90, py + 25, 8, sh.crown === 'silver' ? '#6a7a8a' : sh.crown ? '#d08a00' : sh.record ? '#c0392b' : '#8a6a4a', 'center', null);
     if (sh.crown) { const ci = I.crown[sh.crown]; g.drawImage(ci, 22, py + 18, ci.width * 2, ci.height * 2); }
     if (sh.shiny) txt('闪光!', 32, py + 12, 10, '#e89a00', 'center', '#fff3d0');
-    g.drawImage(I[sh.buff], 44, 164, 18, 18);
-    txt(sh.label + (sh.shiny ? ' ×2' : ''), 68, 173, 11, '#7a3b12', 'left', null);
-    g.drawImage(I.coin, 72, 184); txt('+' + sh.val, 83, 189, 9, '#9a6a00', 'left', null);
+    cardRewardRow([{ icon: I[sh.buff], iconSize: 18, label: sh.label + (sh.shiny ? ' ×2' : ''), col: '#7a3b12' }], 173, 11);
+    cardRewardRow([{ icon: I.coin, iconSize: 9, label: '+' + sh.val, col: '#9a6a00' }], 189, 9);
   }
   if (sh.note) txt(sh.note, 90, py + ph - 10, 7, '#5a7a3a', 'center', null);
   if (sh.keepsake != null) { const i = sh.keepsake; panel(23, py + ph + 27, 134, 23); g.drawImage(keepsakeImg(i), 28, py + ph + 31); txt('顺手捞到了' + KEEPSAKES[i].name, 99, py + ph + 38, 7, '#7a3b12', 'center', null); }
