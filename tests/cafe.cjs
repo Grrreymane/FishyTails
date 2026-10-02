@@ -75,7 +75,7 @@ async function check(name, fn, saved) {
     assert.deepEqual(await run('[CAFE.coins, CAFE.pending, totalStock()]'), [6, 0, 0]);
   }, { 'sea-monster-cafe': { businessAt: 1800000000000 - 180000, cooler: { sardine: { n: 3, p: 0 } } } });
   await check('decor spends café funds while gear spends fishing coins', async ({ run }) => {
-    await run('earn(1000); CAFE.coins = 500; openCafe("title"); cafe.sheet = 2; cafe.slot = 0; cafePress({x:140,y:212})');
+    await run('earn(1000); CAFE.coins = 500; openCafe("title"); cafe.sheet = 2; cafe.slot = 0; const b=decoBtn(1); cafePress({x:b[0]+b[2]/2,y:b[1]+b[3]/2})');
     assert.deepEqual(await run('[CAFE.coins, WALLET.coins, CAFE.deco.eq.wall]'), [200, 1000, 'wave']);
     await run('closeCafe(); openShop("title"); shopPress({x:135,y:174})');
     assert.deepEqual(await run('[CAFE.coins, WALLET.coins, WALLET.eq.hat]'), [200, 700, 'straw']);
@@ -99,7 +99,7 @@ async function check(name, fn, saved) {
     await run('newRun(); go("idle")');
     const box = await page.locator('#c').boundingBox();
     const click = (x, y) => page.mouse.click(box.x + x * box.width / 180, box.y + y * box.height / 320);
-    await click(107, 8); assert.equal(await run('state'), 'shop');
+    await click(142, 33); assert.equal(await run('state'), 'shop');
     await click(157, 33); assert.equal(await run('state'), 'idle');
     await click(172, 30); assert.equal(await run('state'), 'menu');
     await click(90, 188); assert.equal(await run('state'), 'dex');
@@ -112,7 +112,7 @@ async function check(name, fn, saved) {
     await page.screenshot({ path: path.join(root, '.shots/navigation-fight.png') });
     const box = await page.locator('#c').boundingBox();
     const click = (x,y) => page.mouse.click(box.x+x*box.width/180,box.y+y*box.height/320);
-    await click(107,8); assert.equal(await run('state'), 'shop');
+    await click(142,33); assert.equal(await run('state'), 'shop');
     const before = await run('[F.y,F.timer,tension,menuRunTime]');
     const after = await run('update(.05,.05); shopPress({x:157,y:33}); const result=[F.y,F.timer,tension,st]; menuFrom=state;menuRunTime=st;go("menu");render();result');
     assert.deepEqual(after,before);
@@ -126,6 +126,93 @@ async function check(name, fn, saved) {
     await advance(45000);
     assert.deepEqual(await run('[CAFE.pending, totalStock(), run.coins]'), [6, 0, 0]);
   });
+  await check('charm attracts ambient visitors without accelerating sales or creating rewards', async ({ run }) => {
+    const comparison = await run(`
+      newRun(); CAFE.trophy={};
+      function sampleCafe(high) {
+        DECO_SLOTS.forEach(slot=>{
+          const items=DECO[slot].items;
+          CAFE.deco.eq[slot]=high&&slot!=='seat'&&slot!=='stove'
+            ? items.reduce((best,it)=>(it.charm||0)>(best.charm||0)?it:best,items[0]).id
+            : items[0].id;
+        });
+        CAFE.cooler={sardine:{n:100,p:0}}; CAFE.boss={}; CAFE.sold={};
+        CAFE.pending=0; CAFE.pop=0; CAFE.serviceMs=0; CAFE.teaMs=0;
+        CAFE.businessAt=Date.now();
+        const interval=cafeServiceMs(), gap=visitorGap(), attraction=charm(CAFE.deco.eq);
+        window.__clock+=180000; settleCafe();
+        return {interval,gap,attraction,ledger:[CAFE.pending,totalStock(),CAFE.sold.sardine,CAFE.pop]};
+      }
+      const low=sampleCafe(false), high=sampleCafe(true);
+      [low,high]
+    `);
+    const [low, high] = comparison;
+    assert.equal(low.interval, 45000);
+    assert.equal(high.interval, low.interval);
+    assert.deepEqual(high.ledger, low.ledger);
+    assert.deepEqual(high.ledger, [8, 96, 4, 4]);
+    assert.ok(high.attraction >= 12);
+    assert.ok(high.gap < low.gap);
+    assert.ok(high.gap >= 22 && low.gap <= 70);
+    const visits = await run(`
+      openCafe('title');
+      const welcomed=cafe.visitors.length;
+      const before=JSON.stringify([CAFE.coins,CAFE.pending,CAFE.pop,CAFE.cooler,CAFE.boss,CAFE.sold,WALLET.coins,run.coins]);
+      cafe.visitors=[];
+      const spawned=spawnCafeVisitor(); render();
+      const cosmetic=cafe.visitors.every(c=>c.visitor&&c.d==null&&c.seat==null&&!c.tipReady);
+      cafe.visitors.forEach(c=>{tapGuest(c);tapGuest(c);});
+      for(let i=0;i<800;i++) updCafeVisitors(.05);
+      const after=JSON.stringify([CAFE.coins,CAFE.pending,CAFE.pop,CAFE.cooler,CAFE.boss,CAFE.sold,WALLET.coins,run.coins]);
+      [welcomed,spawned,cosmetic,before===after]
+    `);
+    assert.ok(visits[0] > 0, 'high-charm cafés show a visitor as soon as the player returns');
+    assert.deepEqual(visits.slice(1), [true, true, true]);
+  });
+  await check('expanded decor preserves old saves and every page supports previews and purchases', async ({ run, page }) => {
+    assert.deepEqual(await run('[CAFE.deco.eq.wall,CAFE.deco.eq.floor,CAFE.deco.eq.plant,CAFE.deco.eq.seat,CAFE.deco.eq.stove,CAFE.cooler.sardine.n]'), ['sakura','tile','palm','s4','master',3]);
+    assert.equal(await run('DECO_SLOTS.every(slot=>Array.isArray(CAFE.deco.owned[slot])&&DECO[slot].items.some(it=>it.id===CAFE.deco.eq[slot]))'), true);
+    assert.equal(await run('["rug","terrace","ornament"].every(slot=>CAFE.deco.eq[slot]===DECO[slot].items[0].id)'), true);
+    await run('openCafe("title"); cafe.sheet=2; cafe.slot=0; cafe.decoPage=0; render()');
+    await page.screenshot({path:path.join(root,'.shots/cafe-catalog-first.png')});
+    const purchased = await run(`
+      CAFE.coins=1000000;
+      const checks=[];
+      DECO_SLOTS.forEach((slot,si)=>{
+        cafe.sheet=2; cafe.decoPage=99;
+        const chip=slotChip(si); cafePress({x:chip[0]+chip[2]/2,y:chip[1]+chip[3]/2});
+        checks.push(cafe.slot===si&&cafe.decoPage===0);
+        DECO[slot].items.forEach((it,i)=>{
+          while(cafe.decoPage<Math.floor(i/3)) cafePress({x:DECO_NEXT[0]+DECO_NEXT[2]/2,y:DECO_NEXT[1]+DECO_NEXT[3]/2});
+          const local=i%3, row=decoRow(local), b=decoBtn(local);
+          cafePress({x:row[0]+4,y:row[1]+row[3]/2});
+          checks.push(cafeEq()[slot]===it.id); render();
+          const owned=decoOwns(slot,it.id), before=CAFE.coins;
+          cafePress({x:b[0]+b[2]/2,y:b[1]+b[3]/2}); render();
+          checks.push(CAFE.deco.eq[slot]===it.id&&decoOwns(slot,it.id)&&CAFE.coins===before-(owned?0:it.price));
+        });
+      });
+      [checks.every(Boolean),checks.length,DECO_SLOTS.length,CAFE.coins>=0]
+    `);
+    assert.equal(purchased[0], true, 'all catalogue entries can be previewed and purchased through their visible page');
+    assert.ok(purchased[1] > 70, 'the complete expanded catalogue was exercised');
+    assert.equal(purchased[2], 10);
+    assert.equal(purchased[3], true);
+    await run('cafe.slot=0; cafe.decoPage=decoPages()-1; cafe.prev=null; render()');
+    await page.screenshot({path:path.join(root,'.shots/cafe-catalog-last.png')});
+    const themes = [
+      {wall:'cream',floor:'honey',lamp:'glass',plant:'flowers',tank:'bowl',rug:'paw',terrace:'picnic',ornament:'teaset'},
+      {wall:'moss',floor:'pebble',lamp:'star',plant:'fern',tank:'reef',rug:'flower',terrace:'garden',ornament:'books'},
+      {wall:'aquarium',floor:'rose',lamp:'glass',plant:'bonsai',tank:'reef',rug:'sea',terrace:'plain',ornament:'phonograph'}
+    ];
+    for(let i=0;i<themes.length;i++) {
+      await run(`Object.assign(CAFE.deco.eq,${JSON.stringify(themes[i])}); DEX.fish.sardine={n:1}; DEX.fish.clown={n:1}; KEEPSAKES.forEach((_,i)=>CAFE.keepsakes[i]=true); TROPHY.forEach((_,i)=>CAFE.trophy[i]=true); openCafe('title'); for(let j=0;j<100;j++) updCafe(.05); POPS=[]; cafe.cust.forEach(c=>c.say=null); CAFE.coins=1800; render()`);
+      await page.screenshot({path:path.join(root,`.shots/cafe-renovated-${i+1}.png`)});
+    }
+    await run('saveCafe()'); await page.reload(); await page.waitForFunction(()=>window.__test);
+    assert.equal(await run('DECO_SLOTS.every(slot=>DECO[slot].items.every(it=>decoOwns(slot,it.id)))'), true, 'all purchases survive a reload');
+    assert.equal(await run('CAFE.deco.eq.ornament'), 'phonograph');
+  }, {'sea-monster-cafe':{coins:1000000,pop:220,cooler:{sardine:{n:3,p:1}},deco:{owned:{wall:['sakura'],floor:['tile'],plant:['palm'],seat:['s4'],stove:['master']},eq:{wall:'sakura',floor:'tile',plant:'palm',seat:'s4',stove:'master'}}}});
   await check('the floating heart itself is clickable and only gives one tip', async ({ run, page }) => {
     const point = await run('openCafe("title"); cafe.cust[0].tipReady = true; render(); ({x:cafe.cust[0].x * CS, y:(cafe.cust[0].bb[1] - 7) * CS})');
     const box = await page.locator('#c').boundingBox();
