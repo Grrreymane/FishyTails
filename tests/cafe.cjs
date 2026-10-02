@@ -190,6 +190,34 @@ async function check(name, fn, saved) {
     await run('const sheet=mk(480,740), pen=sheet.getContext("2d"); pen.fillStyle="#243c49"; pen.fillRect(0,0,480,740); pen.imageSmoothingEnabled=false; pen.font="12px Fusion Pixel"; pen.fillStyle="#ffffff"; ["clown","sardine","eel","lion"].forEach((k,row)=>{[null,...Object.keys(VARIANTS)].forEach((v,col)=>{const img=v?variantSpr(k,v).r:SPR[k].r, sc=Math.min(4,100/img.width,68/img.height); pen.drawImage(img,col*120+10,row*100+14,img.width*sc,img.height*sc);pen.fillText(v?VARIANTS[v].name:"原色",col*120+20,row*100+91);});}); KEEPSAKES.forEach((d,i)=>{pen.drawImage(keepsakeImg(i),(i%3)*160+35,420+Math.floor(i/3)*105,65,75);pen.fillText(d.name,(i%3)*160+28,510+Math.floor(i/3)*105);}); document.body.replaceChildren(sheet); sheet.style.width="480px"; sheet.style.height="740px";');
     await page.locator('canvas').screenshot({ path: path.join(root, '.shots/discovery-art.png') });
   });
+  await check('boss release rewards charge, pay once and preserve progress', async ({run, page}) => {
+    const setup = 'newRun(); run.zone=6; run.zap=0; run.fever=0; startBoss(); go("boss"); B.p=.3; B.state="calm"; B.timer=10; B.stoneT=0; hold=false; jerk=false;';
+    await run(setup + 'updBoss(.02); for(let i=0;i<65;i++) updBoss(.02); render();');
+    await page.screenshot({path:path.join(root,'.shots/guardian-charge.png')});
+    let values = await run('for(let i=0;i<60;i++) updBoss(.02); [B.shellCharge,B.frenzy,B.p,B.stone]');
+    assert.equal(values[0],1); assert.ok(values[1]>2); assert.ok(values[2]>.29); assert.equal(values[3],0);
+    values = await run(setup + 'hold=true; updBoss(.02); for(let i=0;i<121;i++) updBoss(.02); [B.frenzy,B.state]');
+    assert.equal(values[0],0); assert.equal(values[1],'tele');
+    await run('newRun(); run.zone=7; run.zap=0; run.fever=0; startBoss(); go("boss"); B.p=.3; B.state="calm"; B.timer=10; B.tideT=0; hold=false; jerk=false; updBoss(.02); for(let i=0;i<65;i++) updBoss(.02); render();');
+    await page.screenshot({path:path.join(root,'.shots/starwhale-charge.png')});
+    values = await run('for(let i=0;i<96;i++) updBoss(.02); const paid=B.p; for(let i=0;i<10;i++) updBoss(.02); [paid,B.p,B.tide,B.waveCharge]');
+    assert.ok(Math.abs(values[0]-.36)<.002); assert.ok(values[1]<=values[0]); assert.equal(values[2],0); assert.equal(values[3],1);
+  });
+  await check('hidden gesture opens isolated boss challenges without rewards or save changes', async ({run, page}) => {
+    await run('newRun(); go("idle"); go("title"); window.beforePractice=JSON.stringify([SAVED,WALLET,DEX,CAFE]); for(const p of [{x:100,y:38},{x:100,y:38},{x:100,y:38},{x:25,y:70},{x:25,y:70},{x:25,y:70}]) onPress(p);');
+    assert.equal(await run('state'), 'bossSelect');
+    await page.screenshot({path:path.join(root,'.shots/boss-select.png')});
+    for(let zi=0;zi<9;zi++) {
+      await run(`startPractice(${zi}); go('boss'); hold=false; for(let i=0;i<10;i++) updBoss(.02); bossCatch();`);
+      assert.equal(await run('state'), 'bossResult');
+      assert.equal(await run('JSON.stringify([SAVED,WALLET,DEX,CAFE])===window.beforePractice'),true);
+      await run('leavePractice();');
+    }
+    await run('startPractice(6); run.hp=1; bossBreak();');
+    assert.equal(await run('state'),'bossResult');
+    await run('startPractice(6); leavePractice("title");');
+    assert.equal(await run('JSON.stringify([SAVED,WALLET,DEX,CAFE])===window.beforePractice'),true);
+  });
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log(`${passed} checks passed; no browser runtime errors.`);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { if (browser) await browser.close(); server.close(); });
