@@ -291,18 +291,40 @@ async function check(name, fn, saved) {
     await run('const sheet=mk(480,740), pen=sheet.getContext("2d"); pen.fillStyle="#243c49"; pen.fillRect(0,0,480,740); pen.imageSmoothingEnabled=false; pen.font="12px Fusion Pixel"; pen.fillStyle="#ffffff"; ["clown","sardine","eel","lion"].forEach((k,row)=>{[null,...Object.keys(VARIANTS)].forEach((v,col)=>{const img=v?variantSpr(k,v).r:SPR[k].r, sc=Math.min(4,100/img.width,68/img.height); pen.drawImage(img,col*120+10,row*100+14,img.width*sc,img.height*sc);pen.fillText(v?VARIANTS[v].name:"原色",col*120+20,row*100+91);});}); KEEPSAKES.forEach((d,i)=>{pen.drawImage(keepsakeImg(i),(i%3)*160+35,420+Math.floor(i/3)*105,65,75);pen.fillText(d.name,(i%3)*160+28,510+Math.floor(i/3)*105);}); document.body.replaceChildren(sheet); sheet.style.width="480px"; sheet.style.height="740px";');
     await page.locator('canvas').screenshot({ path: path.join(root, '.shots/discovery-art.png') });
   });
-  await check('boss release rewards charge, pay once and preserve progress', async ({run, page}) => {
-    const setup = 'newRun(); run.zone=6; run.zap=0; run.fever=0; startBoss(); go("boss"); B.p=.3; B.state="calm"; B.timer=10; B.stoneT=0; hold=false; jerk=false;';
-    await run(setup + 'updBoss(.02); for(let i=0;i<65;i++) updBoss(.02); render();');
-    await page.screenshot({path:path.join(root,'.shots/guardian-charge.png')});
-    let values = await run('for(let i=0;i<60;i++) updBoss(.02); [B.shellCharge,B.frenzy,B.p,B.stone]');
-    assert.equal(values[0],1); assert.ok(values[1]>2); assert.ok(values[2]>.29); assert.equal(values[3],0);
-    values = await run(setup + 'hold=true; updBoss(.02); for(let i=0;i<121;i++) updBoss(.02); [B.frenzy,B.state]');
-    assert.equal(values[0],0); assert.equal(values[1],'tele');
-    await run('newRun(); run.zone=7; run.zap=0; run.fever=0; startBoss(); go("boss"); B.p=.3; B.state="calm"; B.timer=10; B.tideT=0; hold=false; jerk=false; updBoss(.02); for(let i=0;i<65;i++) updBoss(.02); render();');
-    await page.screenshot({path:path.join(root,'.shots/starwhale-charge.png')});
-    values = await run('for(let i=0;i<96;i++) updBoss(.02); const paid=B.p; for(let i=0;i<10;i++) updBoss(.02); [paid,B.p,B.tide,B.waveCharge]');
-    assert.ok(Math.abs(values[0]-.36)<.002); assert.ok(values[1]<=values[0]); assert.equal(values[2],0); assert.equal(values[3],1);
+  await check('each boss rule works: tangle, claws, heat, suction, runes, waves, dragon acts', async ({run, page}) => {
+    const boss = zi => `newRun(); run.zone=${zi}; run.zap=0; run.fever=0; run.crit=0; startBoss(); go("boss"); B.p=.3; B.state="calm"; B.timer=10; hold=false; jerk=false; tension=20;`;
+    const step = (n, extra = '') => `for(let i=0;i<${n};i++){ ${extra} updBoss(.02); }`;
+    // squid: a tentacle grabs; five quick taps free the line and give a frenzy, ignoring it squeezes the line
+    let v = await run(boss(1) + 'B.tangleT=0; updBoss(.02); const grabbed=B.tangle>0; ' + step(6, 'jerk = i < 5;') + '[grabbed, B.tangle, B.frenzy>1]');
+    assert.deepEqual(v, [true, 0, true]);
+    v = await run(boss(1) + 'B.tangleT=0; updBoss(.02); render(); ' + step(140) + '[B.tangle, tension>60]');
+    assert.deepEqual(v, [0, true]);
+    await page.screenshot({ path: path.join(root, '.shots/boss-squid.png') });
+    // crab: about half the wind-ups are double lunges
+    v = await run(boss(2) + 'let d=0; for(let i=0;i<400;i++){ B.onTele(); if(B.double) d++; } d');
+    assert.ok(v > 140 && v < 260, 'double ratio ' + v);
+    // serpent: holding without a break overheats, reeling in bursts does not
+    v = await run(boss(4) + 'hold=true; ' + step(80) + 'tension');
+    assert.ok(v > 55, 'overheat tension ' + v);
+    v = await run(boss(4) + step(140, 'hold = (i % 50) < 32;') + '[tension < 50, B.heat < 1]');
+    assert.deepEqual(v, [true, true]);
+    // kraken: letting go in a calm spell drags it back much faster than other bosses
+    v = await run(boss(5) + step(50) + 'B.p');
+    assert.ok(v < .285, 'kraken drag ' + v);
+    v = await run(boss(3) + step(50) + 'B.p');
+    assert.ok(v > .29, 'ghost drift ' + v);
+    // guardian: reel through two runes and let go on the third -> stunned instead of lunging; letting go early -> it lunges
+    v = await run(boss(6) + 'B.timer=.001; hold=true; ' + step(66) + 'hold=false; ' + step(40) + '[B.stun>0, B.state]');
+    assert.deepEqual(v, [true, 'calm']);
+    v = await run(boss(6) + 'B.timer=.001; hold=false; ' + step(100) + '[B.stun>0, B.state]');
+    assert.deepEqual(v, [false, 'dash']);
+    // starwhale: reeling with the wave is faster and calm; against it the line strains
+    v = await run(boss(7) + 'B.waveDir=1; hold=true; ' + step(50) + '[B.p, tension]');
+    const w = await run(boss(7) + 'B.waveDir=-1; B.prevState="calm"; hold=true; ' + step(50) + '[B.p, tension]');
+    assert.ok(v[0] > w[0] + .02 && w[1] > v[1] + 20, JSON.stringify([v, w]));
+    // dragon: claws, then heat, then suction
+    v = await run(boss(8) + '[0,1,2].map(ph => { B.phase = ph; return bRule(B); })');
+    assert.deepEqual(v, ['claws', 'heat', 'suck']);
   });
   await check('hidden gesture opens isolated boss challenges without rewards or save changes', async ({run, page}) => {
     await run('newRun(); go("idle"); go("title"); window.beforePractice=JSON.stringify([SAVED,WALLET,DEX,CAFE]); for(const p of [{x:100,y:38},{x:100,y:38},{x:100,y:38},{x:25,y:70},{x:25,y:70},{x:25,y:70}]) onPress(p);');
