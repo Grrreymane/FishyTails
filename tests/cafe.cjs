@@ -52,15 +52,15 @@ async function check(name, fn, saved) {
   await check('fish and premium meals earn only café income; returning never duplicates it', async ({ run, advance }) => {
     await run('newRun(); storeFish("sardine", true); storeFish("sardine", false)');
     await advance(90000);
-    assert.deepEqual(await run('[CAFE.pending, totalStock(), CAFE.sold.sardine, CAFE.pop, WALLET.coins, run.coins]'), [6, 0, 2, 2, 0, 0]);
+    assert.deepEqual(await run('[CAFE.pending, totalStock(), CAFE.sold.sardine, CAFE.pop, WALLET.coins, run.coins]'), [15, 0, 2, 2, 0, 0]);
     await run('openCafe("title"); closeCafe(); openCafe("title")');
-    assert.deepEqual(await run('[CAFE.coins, CAFE.pending, cafe.earned]'), [6, 0, 0]);
+    assert.deepEqual(await run('[CAFE.coins, CAFE.pending, cafe.earned]'), [15, 0, 0]);
   });
   await check('base tea accumulates by time, including partial minutes and eight-hour cap', async ({ run, advance }) => {
     await advance(299000); assert.equal(await run('CAFE.pending'), 0);
-    await advance(1000); assert.equal(await run('CAFE.pending'), 1);
-    await advance(24 * 3600000); assert.equal(await run('CAFE.pending'), 97);
-    await run('settleCafe()'); assert.equal(await run('CAFE.pending'), 97);
+    await advance(1000); assert.equal(await run('CAFE.pending'), 2);
+    await advance(24 * 3600000); assert.equal(await run('CAFE.pending'), 194);
+    await run('settleCafe()'); assert.equal(await run('CAFE.pending'), 194);
   });
   await check('new catches cannot be sold retroactively for time spent with an empty fridge', async ({ run, advance }) => {
     await advance(3600000);
@@ -69,10 +69,10 @@ async function check(name, fn, saved) {
     await advance(1000); assert.equal(await run('stockOf("sardine")'), 0);
   });
   await check('offline balance survives reload and can only be collected once', async ({ run, page }) => {
-    assert.equal(await run('CAFE.pending'), 6);
+    assert.equal(await run('CAFE.pending'), 15);
     await run('openCafe("title")');
     await page.reload(); await page.waitForFunction(() => window.__test);
-    assert.deepEqual(await run('[CAFE.coins, CAFE.pending, totalStock()]'), [6, 0, 0]);
+    assert.deepEqual(await run('[CAFE.coins, CAFE.pending, totalStock()]'), [15, 0, 0]);
   }, { 'sea-monster-cafe': { businessAt: 1800000000000 - 180000, cooler: { sardine: { n: 3, p: 0 } } } });
   await check('decor spends café funds while gear spends fishing coins', async ({ run }) => {
     await run('earn(1000); CAFE.coins = 500; openCafe("title"); cafe.sheet = 2; cafe.slot = 0; const b=decoBtn(1); cafePress({x:b[0]+b[2]/2,y:b[1]+b[3]/2})');
@@ -124,7 +124,7 @@ async function check(name, fn, saved) {
   await check('seating and cooking upgrades improve the single ledger without spending score', async ({ run, advance }) => {
     await run('newRun(); CAFE.deco.eq.seat = "s4"; CAFE.deco.eq.stove = "master"; storeFish("sardine", false); storeFish("sardine", false)');
     await advance(45000);
-    assert.deepEqual(await run('[CAFE.pending, totalStock(), run.coins]'), [6, 0, 0]);
+    assert.deepEqual(await run('[CAFE.pending, totalStock(), run.coins]'), [16, 0, 0]);
   });
   await check('charm attracts ambient visitors without accelerating sales or creating rewards', async ({ run }) => {
     const comparison = await run(`
@@ -150,7 +150,7 @@ async function check(name, fn, saved) {
     assert.equal(low.interval, 45000);
     assert.equal(high.interval, low.interval);
     assert.deepEqual(high.ledger, low.ledger);
-    assert.deepEqual(high.ledger, [8, 96, 4, 4]);
+    assert.deepEqual(high.ledger, [20, 96, 4, 4]);
     assert.ok(high.attraction >= 12);
     assert.ok(high.gap < low.gap);
     assert.ok(high.gap >= 22 && low.gap <= 70);

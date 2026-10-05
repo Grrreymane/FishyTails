@@ -1092,7 +1092,7 @@ const DECO = {
   floor: { name: '地板', items: [{ id: 'check', name: '木格地板', price: 0 }, { id: 'tile', name: '蓝白瓷砖', price: 300, charm: 2 }, { id: 'tatami', name: '草席', price: 800, charm: 4 }, { id: 'shell', name: '贝壳马赛克', price: 2000, charm: 7 }, { id: 'honey', name: '蜂蜜人字木', price: 600, charm: 3 }, { id: 'pebble', name: '海石地砖', price: 1000, charm: 5 }, { id: 'rose', name: '玫瑰拼花砖', price: 2600, charm: 8 }] },
   lamp:  { name: '灯具', items: [{ id: 'none', name: '没有灯', price: 0 }, { id: 'lantern', name: '纸灯笼', price: 400, charm: 3 }, { id: 'shelllamp', name: '贝壳吊灯', price: 1200, charm: 6 }, { id: 'glass', name: '琥珀玻璃灯', price: 750, charm: 4 }, { id: 'star', name: '星星串灯', price: 1800, charm: 7 }] },
   plant: { name: '植物', items: [{ id: 'none', name: '没有植物', price: 0 }, { id: 'pot', name: '小盆栽', price: 200, charm: 1 }, { id: 'palm', name: '椰子树', price: 900, charm: 4 }, { id: 'flowers', name: '绣球花篮', price: 350, charm: 2 }, { id: 'fern', name: '蕨叶花架', price: 650, charm: 3 }, { id: 'bonsai', name: '小松盆景', price: 1500, charm: 6 }] },
-  tank:  { name: '鱼缸', items: [{ id: 'none', name: '没有鱼缸', price: 0 }, { id: 'bowl', name: '小鱼缸', price: 1500, charm: 5 }, { id: 'big', name: '大水族箱', price: 5000, charm: 12 }, { id: 'reef', name: '珊瑚生态缸', price: 6500, charm: 14 }] },
+  tank:  { name: '鱼缸', items: [{ id: 'none', name: '没有鱼缸', price: 0 }, { id: 'bowl', name: '小鱼缸', price: 800, charm: 5 }, { id: 'big', name: '大水族箱', price: 5000, charm: 12 }, { id: 'reef', name: '珊瑚生态缸', price: 6500, charm: 14 }] },
   seat:  { name: '座位', items: [{ id: 's2', name: '两个座位', price: 0, seats: 2 }, { id: 's3', name: '三个座位', price: 500, seats: 3 }, { id: 's4', name: '四个座位', price: 1500, seats: 4 }, { id: 's5', name: '五个座位', price: 4000, seats: 5 }] },
   stove: { name: '厨具', items: [{ id: 'basic', name: '普通灶台', price: 0, mult: 1 }, { id: 'copper', name: '铜锅', price: 1200, mult: 1.25 }, { id: 'master', name: '名匠厨刀', price: 4000, mult: 1.5 }] },
   rug: { name: '地毯', items: [{ id: 'none', name: '没有地毯', price: 0 }, { id: 'sea', name: '海浪小毯', price: 120, charm: 1 }, { id: 'paw', name: '猫爪编织毯', price: 420, charm: 3 }, { id: 'flower', name: '花瓣圆毯', price: 950, charm: 5 }] },
@@ -1146,7 +1146,7 @@ const totalStock = () => DISH_KEYS.reduce((s, k) => s + stockOf(k), 0);
 function cafeNews(s) { CAFE.news = [...CAFE.news.filter(n => n !== s), s].slice(-4); }
 const CAFE_AWAY_MAX = 8 * 60 * 60 * 1000;
 const CAFE_TEA_MS = 5 * 60000;
-const cafeDishPrice = k => Math.max(2, R(DISH[k].price * .1));
+const cafeDishPrice = k => Math.max(5, R(DISH[k].price * .1));
 function cafeServiceMs() { return 45000 * 2 / decoItem('seat', CAFE.deco.eq.seat).seats; }
 // One wall-clock ledger for every screen and offline time. Visual guests never charge twice.
 function settleCafe(now = Date.now()) {
@@ -1155,7 +1155,7 @@ function settleCafe(now = Date.now()) {
   CAFE.businessAt = now;
   CAFE.teaMs += elapsed;
   const tea = Math.floor(CAFE.teaMs / CAFE_TEA_MS);
-  CAFE.teaMs %= CAFE_TEA_MS; CAFE.pending += tea;
+  CAFE.teaMs %= CAFE_TEA_MS; CAFE.pending += tea * 2;
   const interval = cafeServiceMs();
   CAFE.serviceMs = totalStock() > 0 ? CAFE.serviceMs + elapsed : 0;
   let count = Math.min(totalStock(), Math.floor(CAFE.serviceMs / interval));
@@ -1340,9 +1340,65 @@ function tankSel(max) {
   const entries = pickd.length ? pickd : [...variantEntries(), ...tankFish().map(k => (DEX.fish[k].shiny ? 's:' : 'f:') + k)];
   return [...new Set([...featured, ...entries])].slice(0, max);
 }
+let tankDragonSprite = null;
+const tankBabySprites = {};
+function tankBossSprite(k) {
+  if (['squid', 'serpent', 'kraken'].includes(k)) {
+    if (tankBabySprites[k]) return tankBabySprites[k];
+    const snake = k === 'serpent', squid = k === 'squid';
+    const c = paint(36, snake ? 24 : 32, G => {
+      if (snake) {
+        const body = [[20,12,4],[16,16,4],[11,18,3.5],[7,16,3],[5,12,2.5],[3,9,1.5],[1,9,1]];
+        for (let i = body.length - 1; i >= 0; i--) {
+          const [x,y,r] = body[i];
+          G.ell(x,y,r,r,'#52282c'); G.ell(x,y-1,Math.max(1,r-.6),Math.max(1,r-.8),'#8c5044');
+          G.ell(x,y+1,Math.max(1,r-.8),1,'#d4955e');
+          G.set(x,y-2,'#ffb03a');
+        }
+      } else {
+        const color = squid ? '#ea6c5e' : '#9a68c0', shade = squid ? '#ac3438' : '#5e3284', sucker = squid ? '#ffd0ae' : '#e9b8ff';
+        for (let i = 0; i < (squid ? 6 : 8); i++) {
+          const count = squid ? 6 : 8, root = 11 + i * 14 / (count - 1), spread = (i - (count - 1) / 2) * 1.1;
+          let last = [root, 17];
+          for (let j = 1; j <= 9; j++) {
+            const x = root + spread * Math.sin(j / 9 * Math.PI / 2) + Math.sin(j * .55 + i) * 1.2;
+            const y = 17 + j * 1.25 - Math.abs(spread) * .35;
+            gThick(G,last[0],last[1],x,y,j < 6 ? 2 : 1,shade);
+            gLine(G,last[0],last[1],x,y,color,true);
+            if(j % 3 === 0) G.set(R(x),R(y),sucker);
+            last=[x,y];
+          }
+        }
+      }
+    });
+    const pen = c.getContext('2d'); pen.imageSmoothingEnabled = false;
+    if (snake) pen.drawImage(SPRB[k].r,16,1,20,14);
+    else if (squid) pen.drawImage(SPRB[k].r,9,0,18,21);
+    else pen.drawImage(SPRB[k].r,5,2,26,18);
+    return (tankBabySprites[k] = makeSpr(c));
+  }
+  if (k !== 'dragon') return SPRB[k];
+  if (tankDragonSprite) return tankDragonSprite;
+  const c = paint(36, 22, G => {
+    // A curled body and tapered tail fit beside the head even in the small bowl.
+    const body = [[19,12,4],[16,15,4],[12,17,3.6],[8,16,3],[5,13,2.5],[4,10,2],[2,8,1]];
+    for (let i = body.length - 1; i >= 0; i--) {
+      const [x,y,r] = body[i];
+      G.ell(x,y,r,r,'#9a2220'); G.ell(x,y-1,r-.6,r-.8,'#dc5638');
+      G.ell(x,y+1,r-.8,1.2,'#ffd23f');
+      G.set(x-1,y-2,'#f08050');
+      if(i<6) {G.tri(x-2,y-r+1,x,y-r-2,x+2,y-r+1,'#32c0a0');G.set(x,y-r-1,'#8ff0d8');}
+    }
+    G.rect(11,19,2,2,'#d89a1a'); G.rect(10,20,4,1,'#fff0a0');
+    G.rect(20,15,2,3,'#d89a1a'); G.rect(20,17,4,1,'#fff0a0');
+  });
+  const pen = c.getContext('2d'); pen.imageSmoothingEnabled = false;
+  pen.drawImage(SPRB.dragon.r, 16, 0, 20, 15);
+  return (tankDragonSprite = makeSpr(c));
+}
 // sprite for an entry facing dir, scaled to fit mw x mh (monster babies come out a little smaller)
 function tankImg(e, dir, mw, mh) {
-  const [t, k, v] = e.split(':'), S = t === 'b' ? SPRB[k] : t === 'v' ? variantSpr(k, v) : SPR[k];
+  const [t, k, v] = e.split(':'), S = t === 'b' ? tankBossSprite(k) : t === 'v' ? variantSpr(k, v) : SPR[k];
   const img = t === 's' ? (dir > 0 ? S.gr : S.gl) : (dir > 0 ? S.r : S.l);
   const sc = t === 'b' ? Math.min(mw * .8 / S.w, mh / S.h) : Math.min(1, mw / S.w, mh / S.h);
   return { img, w: S.w * sc, h: S.h * sc };
@@ -2145,7 +2201,7 @@ function drawTankPicker() {
     const [x, y, w, h] = pickCell(i), [t, k, v] = e.split(':'), on = cur.indexOf(e);
     g.fillStyle = on >= 0 ? '#e0a020' : t === 'b' ? '#b87060' : '#c9a86a'; g.fillRect(x, y, w, h);
     g.fillStyle = t === 'b' ? '#e8c0a0' : t === 's' ? '#fff0b0' : '#ecd49c'; g.fillRect(x + 1, y + 1, w - 2, h - 2);
-    const S = t === 'b' ? SPRB[k] : t === 'v' ? variantSpr(k, v) : SPR[k];
+    const S = t === 'b' ? tankBossSprite(k) : t === 'v' ? variantSpr(k, v) : SPR[k];
     drawFit(t === 's' ? S.gr : S.r, x + w / 2, y + 16, w - 6, 24, t === 'b' ? .5 : 2);
     txt(t === 'b' ? BABY[k] : t === 'v' ? VARIANTS[v].name + SP[k].name.slice(0, 3) : (SP[k].name.length > 4 ? SP[k].name.slice(0, 4) : SP[k].name), x + w / 2, y + 33, t === 'v' ? 6 : 6.5, t === 'b' ? '#7a2a1a' : dark, 'center', null);
     if (t === 's') g.drawImage(I.star, x + 2, y + 2);
@@ -3484,7 +3540,7 @@ function drawHUD(z) {
   const money = String(R(coinsShown)), moneySize = money.length > 6 ? 7 : 8;
   const moneySprite = textSprite({ s: money, size: moneySize, col: '#ffe14a', stroke: OUT });
   const moneyWidth = (moneySprite.w - 2 * moneySprite.pad) / K;
-  g.drawImage(I.coin, R(159 - moneyWidth - 12), 2); txt(money, 159, 7, moneySize, '#ffe14a', 'right');
+  g.drawImage(I.coin, R(147 - moneyWidth - 12), 2); txt(money, 147, 7, moneySize, '#ffe14a', 'right');
   txt(z.name, 3, 17, 7, '#ffffff', 'left');
   for (let i = 0; i < NEED; i++) {
     const x = 128 + i * 7; g.fillStyle = OUT; g.fillRect(x, 14, 6, 6);
