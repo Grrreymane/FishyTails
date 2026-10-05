@@ -99,12 +99,15 @@ async function check(name, fn, saved) {
     await run('newRun(); go("idle")');
     const box = await page.locator('#c').boundingBox();
     const click = (x, y) => page.mouse.click(box.x + x * box.width / 180, box.y + y * box.height / 320);
-    await click(120, 33); assert.equal(await run('state'), 'shop');
+    await click(152, 8); assert.equal(await run('state'), 'shop');
     await click(157, 33); assert.equal(await run('state'), 'idle');
-    await click(160, 33); assert.equal(await run('state'), 'menu');
-    await click(90, 188); assert.equal(await run('state'), 'dex');
+    await click(170, 9); assert.equal(await run('state'), 'menu');
+    const muted0 = await run('muted'); await click(90, 226); assert.equal(await run('muted'), !muted0); await click(90, 226);
+    await click(90, 151); assert.equal(await run('state'), 'shop');
+    await click(157, 33); assert.equal(await run('state'), 'menu');
+    await click(90, 201); assert.equal(await run('state'), 'dex');
     await click(157, 37); assert.equal(await run('state'), 'menu');
-    await click(90, 160); assert.equal(await run('state'), 'cafe');
+    await click(90, 176); assert.equal(await run('state'), 'cafe');
     await click(155, 9); assert.equal(await run('state'), 'idle');
   });
   await check('mid-fight presses never open the shop; the menu pauses and resumes the same fight', async ({ run, page }) => {
@@ -112,11 +115,11 @@ async function check(name, fn, saved) {
     await page.screenshot({ path: path.join(root, '.shots/navigation-fight.png') });
     const box = await page.locator('#c').boundingBox();
     const click = (x,y) => page.mouse.click(box.x+x*box.width/180,box.y+y*box.height/320);
-    await click(120,33); assert.equal(await run('state'), 'fight');
+    await click(152,8); assert.equal(await run('state'), 'fight');
     await run('hold = false; jerk = false; tension = 30; F.timer = 100');
     const before = await run('[F.y,F.timer,tension]');
-    await click(160,33); assert.equal(await run('state'), 'menu');
-    const after = await run('update(.05,.05); onPress({x:90,y:132}); [state, F.y, F.timer, tension]');
+    await click(170,9); assert.equal(await run('state'), 'menu');
+    const after = await run('update(.05,.05); onPress({x:90,y:126}); [state, F.y, F.timer, tension]');
     assert.deepEqual(after, ['fight', ...before]);
     await run('menuFrom=state;menuRunTime=st;go("menu");render()');
     await page.screenshot({ path: path.join(root, '.shots/navigation-menu.png') });
