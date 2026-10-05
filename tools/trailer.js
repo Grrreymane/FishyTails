@@ -8,6 +8,7 @@
   const FPS = 30, DT = 1 / FPS;
   wantedTrack = () => 'z0';          // the sunny tune all the way through, instead of a new one at every cut
   muted = false;
+  setLang('zh');
 
   const tick = (dt = DT) => { let d = dt; if (slowT > 0) { slowT -= dt; d *= .3; } update(d, dt); shake = 0; };
   const silent = (sec) => { const m = muted; muted = true; for (let t = 0; t < sec; t += DT) tick(); muted = m; };
@@ -28,16 +29,16 @@
     if (state === 'fight') hold = true;
   } });
   // 2. sea montage: one leap per zone
-  [1, 2, 4, 5, 7, 8].forEach((zi, n) => shots.push({ len: .62, caption: '九片海域', capY: 236, start() {
+  [1, 2, 3, 4, 7, 8].forEach((zi, n) => shots.push({ len: .62, caption: '九片海域', capY: 236, start() {
     fresh(zi);
     silent(.3);
     const k = best(zi);
     F = { key: k, shiny: n === 3, x: 120, y: SURF + 1, px: 120, py: SURF + 1, face: -1 }; catchFish(); leap.dur = .66; mood('happy', 2);
   } }));
-  // 3. boss: the Dragon King rises, a phase breaks, it comes up
+  // 3. boss: the Abyss Kraken from the cover rises, a phase breaks, it comes up
   // (the pull is scripted: reeling itself is off, B.p climbs on a timer so the cut lands on time)
   shots.push({ len: 4.2, caption: '挑战海怪', start() {
-    fresh(8); run.zoneCaught = NEED; run.hp = 6;
+    fresh(5); run.zoneCaught = NEED; run.hp = 6;
     startBoss(); silent(.35);
   }, during(t) {
     if (state === 'boss') { hold = true; run.reel = 0; B.state = 'calm'; B.timer = 9; B.p = Math.min(1, Math.max(B.p, .6) + DT * .27); tension = 30 + 8 * Math.sin(t * 9); }
@@ -61,9 +62,19 @@
       if (c) tapGuest(c); this.tapped = n;
     }
   } });
-  // 5. title as the end card
+  // 5. title as the end card: just the logo and "tap to start", no menu buttons
+  const gameOverlay = drawOverlay;
   shots.push({ len: 2.4, start() {
     cleanSlate(); run = null; SAVED = null; setupZone(0); go('title'); st = 0;
+    drawOverlay = z => {
+      if (state !== 'title') return gameOverlay(z);
+      [[-1, 26], [1, 22]].forEach(([s, h], i) => tentacle(90 + s * 70, H + 4, -Math.PI / 2 - s * .25, 60 + h, 5, ['#46226a', '#6b3d8f', '#9a68c0'], '#e9b8ff', i * 2, 1.2));
+      txt('渔喵传说', 90, 128, 28, '#ffe14a', 'center', OUT);
+      txt('FISHY TAILS', 90, 150, 9, '#9fe8ff', 'center', OUT);
+      txt('猫猫钓鱼 · 吃Buff · 打海怪', 90, 166, 9, '#ffffff');
+      if (Math.floor(T * 2) % 2 === 0) txt('点击开始钓鱼', 90, 194, 12, '#ffffff');
+      g.drawImage(I.hand, 118, 203 + R(Math.abs(Math.sin(T * 4)) * -4));
+    };
   } });
   const total = shots.reduce((s, x) => s + x.len, 0);
 

@@ -6,6 +6,8 @@
 
 **在线试玩：** https://grrreymane.github.io/FishyTails/
 
+**中文 / English**：按浏览器语言自动选择，标题画面左上角可切换。宣传视频：[trailer.mp4](trailer.mp4)（竖屏 18 秒，`tools/trailer.js` 生成）。
+
 ## 怎么玩
 
 - **点击**抛竿，鱼咬钩出现 **!** 时**按住**
