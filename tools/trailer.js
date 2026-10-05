@@ -6,8 +6,7 @@
   let seed = 7;
   Math.random = () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
   const FPS = 30, DT = 1 / FPS;
-  let song = 'z0';
-  wantedTrack = () => song;          // one tune per section instead of a new one at every cut
+  wantedTrack = () => 'z0';          // the sunny tune all the way through, instead of a new one at every cut
   muted = false;
 
   const tick = (dt = DT) => { let d = dt; if (slowT > 0) { slowT -= dt; d *= .3; } update(d, dt); shake = 0; };
@@ -20,7 +19,7 @@
   const shots = [];
   // 1. the core loop in under 3 s: bite → reel → a shiny leaps out → card
   shots.push({ len: 3.0, start() {
-    fresh(0); run.coins = 0; coinsShown = 0; song = 'z0';
+    fresh(0); run.coins = 0; coinsShown = 0;
     const t = tipPos(); bob = { x: 118, dip: 0 }; hook = { x: 118, y: 196, ty: 196 }; cast = { wait: 0 };
     biter = { key: 'tang', x: 118, y: 196, face: -1, ph: 'bite', t: 0, n: 1, c: 0, shiny: true }; go('wait');
   }, during(t) {
@@ -30,7 +29,7 @@
   } });
   // 2. sea montage: one leap per zone
   [1, 2, 4, 5, 7, 8].forEach((zi, n) => shots.push({ len: .62, caption: '九片海域', capY: 236, start() {
-    fresh(zi); song = 'z0';
+    fresh(zi);
     silent(.3);
     const k = best(zi);
     F = { key: k, shiny: n === 3, x: 120, y: SURF + 1, px: 120, py: SURF + 1, face: -1 }; catchFish(); leap.dur = .66; mood('happy', 2);
@@ -38,14 +37,14 @@
   // 3. boss: the Dragon King rises, a phase breaks, it comes up
   // (the pull is scripted: reeling itself is off, B.p climbs on a timer so the cut lands on time)
   shots.push({ len: 4.2, caption: '挑战海怪', start() {
-    fresh(8); run.zoneCaught = NEED; run.hp = 6; song = 'boss';
+    fresh(8); run.zoneCaught = NEED; run.hp = 6;
     startBoss(); silent(.35);
   }, during(t) {
     if (state === 'boss') { hold = true; run.reel = 0; B.state = 'calm'; B.timer = 9; B.p = Math.min(1, Math.max(B.p, .6) + DT * .27); tension = 30 + 8 * Math.sin(t * 9); }
   } });
   // 4. café
-  shots.push({ len: 3.0, caption: '经营渔喵小馆', start() {
-    cleanSlate(); run = null; song = 'cafe';
+  shots.push({ len: 5.0, caption: '经营渔喵小馆', start() {
+    cleanSlate(); run = null;
     const top = s => DECO[s].items[DECO[s].items.length - 1].id;
     DECO_SLOTS.forEach(s => { const id = s === 'wall' ? 'sakura' : top(s); if (!CAFE.deco.owned[s].includes(id)) CAFE.deco.owned[s].push(id); CAFE.deco.eq[s] = id; });
     ['tang', 'koi', 'clown', 'narwhal', 'ruby', 'glowfish', 'octo', 'parrot'].forEach(k => { CAFE.cooler[k] = { n: 20, p: 4 }; CAFE.known[k] = true; });
@@ -55,11 +54,16 @@
     silent(5.5);
   }, during(t) {
     // tap a happy guest: chat bubble, heart and a tip
-    if (t > .9 && !this.tapped) { const c = cafe.cust.find(c => c.tipReady && !c.tipped) || cafe.cust.find(c => c.ph === 'eat'); if (c) { tapGuest(c); this.tapped = true; } }
+    for (const [at, n] of [[.9, 1], [3, 2]]) if (t > at && (this.tapped || 0) < n) {
+      // the second one is out on the deck, so its bubble doesn't pile onto the diners' bubbles
+      const c = n === 1 ? cafe.cust.find(c => c.tipReady && !c.tipped) || cafe.cust.find(c => c.ph === 'eat')
+                        : cafe.cust.find(c => c.ph === 'rest') || cafe.visitors[0];
+      if (c) tapGuest(c); this.tapped = n;
+    }
   } });
   // 5. title as the end card
   shots.push({ len: 2.4, start() {
-    cleanSlate(); run = null; SAVED = null; song = 'cafe'; setupZone(0); go('title'); st = 0;
+    cleanSlate(); run = null; SAVED = null; setupZone(0); go('title'); st = 0;
   } });
   const total = shots.reduce((s, x) => s + x.len, 0);
 
