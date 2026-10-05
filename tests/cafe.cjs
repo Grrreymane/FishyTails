@@ -99,27 +99,38 @@ async function check(name, fn, saved) {
     await run('newRun(); go("idle")');
     const box = await page.locator('#c').boundingBox();
     const click = (x, y) => page.mouse.click(box.x + x * box.width / 180, box.y + y * box.height / 320);
-    await click(142, 33); assert.equal(await run('state'), 'shop');
+    await click(120, 33); assert.equal(await run('state'), 'shop');
     await click(157, 33); assert.equal(await run('state'), 'idle');
-    await click(172, 30); assert.equal(await run('state'), 'menu');
+    await click(160, 33); assert.equal(await run('state'), 'menu');
     await click(90, 188); assert.equal(await run('state'), 'dex');
     await click(157, 37); assert.equal(await run('state'), 'menu');
     await click(90, 160); assert.equal(await run('state'), 'cafe');
     await click(155, 9); assert.equal(await run('state'), 'idle');
   });
-  await check('shop pauses an actual fight and preserves its line and timers', async ({ run, page }) => {
+  await check('mid-fight presses never open the shop; the menu pauses and resumes the same fight', async ({ run, page }) => {
     await run('newRun(); setupZone(2); biter={key:"cod",shiny:false,x:90,y:180,face:1}; bob={x:90}; startFight(); F.timer=100; render()');
     await page.screenshot({ path: path.join(root, '.shots/navigation-fight.png') });
     const box = await page.locator('#c').boundingBox();
     const click = (x,y) => page.mouse.click(box.x+x*box.width/180,box.y+y*box.height/320);
-    await click(142,33); assert.equal(await run('state'), 'shop');
-    const before = await run('[F.y,F.timer,tension,menuRunTime]');
-    const after = await run('update(.05,.05); shopPress({x:157,y:33}); const result=[F.y,F.timer,tension,st]; menuFrom=state;menuRunTime=st;go("menu");render();result');
-    assert.deepEqual(after,before);
+    await click(120,33); assert.equal(await run('state'), 'fight');
+    await run('hold = false; jerk = false; tension = 30; F.timer = 100');
+    const before = await run('[F.y,F.timer,tension]');
+    await click(160,33); assert.equal(await run('state'), 'menu');
+    const after = await run('update(.05,.05); onPress({x:90,y:132}); [state, F.y, F.timer, tension]');
+    assert.deepEqual(after, ['fight', ...before]);
+    await run('menuFrom=state;menuRunTime=st;go("menu");render()');
     await page.screenshot({ path: path.join(root, '.shots/navigation-menu.png') });
     await page.setViewportSize({width:375,height:812});
     await run('openCafe("menu");render()');
     await page.screenshot({ path: path.join(root, '.shots/navigation-cafe-mobile.png') });
+  });
+  await check('gear bought mid-run works at once, swaps back cleanly and survives a continue', async ({ run }) => {
+    const r = await run(`WALLET.coins = 99999; WALLET.owned.boat = []; WALLET.eq.boat = 'wood'; newRun(); go('idle'); const hp0 = run.hp;
+      menuFrom = 'idle'; menuRunTime = 0; openShop('run'); shopTab = SHOP_CATS.indexOf('boat');
+      const tap = i => { const b = shopBtnRect(i); shopPress({ x: b[0] + 2, y: b[1] + 2 }); };
+      tap(1); const hp1 = run.hp; tap(0); const hp2 = run.hp; tap(1);
+      run.hp = 0; continueRun(); [hp1 - hp0, hp2 - hp0, run.hp, run.gear.boat]`);
+    assert.deepEqual(r, [1, 0, 4, 'melon']);
   });
   await check('seating and cooking upgrades improve the single ledger without spending score', async ({ run, advance }) => {
     await run('newRun(); CAFE.deco.eq.seat = "s4"; CAFE.deco.eq.stove = "master"; storeFish("sardine", false); storeFish("sardine", false)');
