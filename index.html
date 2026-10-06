@@ -757,7 +757,10 @@ const SPRB = {
 // y0/y1: where the boss sits at 0% and 100% progress. card: sprite + facing used on the catch card and in the dex.
 SPRB.guardian.stoneL = tintC(SPRB.guardian.l, '#8a8f9a', .65);
 // Each boss bends one rule of "hold to reel, let go when it struggles". The Dragon King runs three of them in turn.
-const RUNE = .6;   // 遗迹守护者: three runes light one by one, then it lunges
+const RUNE = .6;   // 遗迹守护者: three runes light one by one, then it lunges; each countdown picks its own pace
+// 深渊克拉肯: the suction only bites once a struggle is over and you've had a moment to grab the line again
+const SUCK_GRACE = .35, sucking = b => !!b && b === B && bRule(b) === 'suck' && b.state === 'calm' && (b.calmT || 0) > SUCK_GRACE && !(b.stun > 0) && !(b.frenzy > 0);
+const runeDur = b => b.runeDur || RUNE, runeT = b => runeDur(b) * 3 - b.timer, runeEarly = b => runeT(b) < runeDur(b) * 2;
 const DRAGON_RULES = ['claws', 'heat', 'suck'], DRAGON_PHASE = ['', '第二阶段：线会发烫', '第三阶段：别松手太久'];
 const bRule = b => b ? (b.key === 'dragon' ? DRAGON_RULES[b.phase] : b.d.rule) : null;
 const BOSSES = {
@@ -766,10 +769,10 @@ const BOSSES = {
   crab:    { name: '冰霜巨蟹',   len: 800, pow: 1.0, spd: 32, tele: .75, calm: () => rand(1.3, 2.2), dash: () => rand(.45, .7), y0: 220, y1: 155, val: 400,  card: () => SPRB.crab.r, rule: 'claws', hint: '举几只钳子就冲几下' },
   ghost:   { name: '幽灵鲨',     len: 920, pow: 1.05, spd: 32, tele: .75, calm: () => rand(1.1, 2),   dash: () => rand(.7, 1.1),  y0: 235, y1: 150, val: 520,  card: () => SPRB.ghost.l },
   serpent: { name: '熔岩海蛇',   len: 1040, pow: 1.1, spd: 34, tele: .75, calm: () => rand(1.6, 2.6), dash: () => rand(.7, 1.1),  y0: 224, y1: 150, val: 700,  card: () => SPRB.serpent.l, rule: 'heat', hint: '线会发烫，点着拉' },
-  kraken:  { name: '深渊克拉肯', len: 1700, pow: 1.4, spd: 34, tele: .67, calm: () => rand(.8, 1.6),  dash: () => rand(.7, 1.1),  y0: 198, y1: 148, val: 1000, card: () => SPRB.kraken.r, rule: 'suck', hint: '别松手太久，会被拖走' },
+  kraken:  { name: '深渊克拉肯', len: 1450, pow: 1.2, spd: 34, tele: .67, calm: () => rand(1.2, 2),  dash: () => rand(.7, 1.1),  y0: 198, y1: 148, val: 1000, card: () => SPRB.kraken.r, rule: 'suck', hint: '别松手太久，会被拖走' },
   guardian:  { name: '遗迹守护者', len: 1700, pow: 1.1, spd: 34, tele: RUNE * 3, calm: () => rand(1, 1.8), dash: () => rand(.8, 1.2), y0: 238, y1: 150, val: 1500, card: () => SPRB.guardian.l, rule: 'runes', hint: '第三颗符文亮时再松手' },
   starwhale: { name: '星鲸',       len: 1900, pow: 1.1, spd: 36, tele: .62, calm: () => rand(1.6, 2.4), dash: () => rand(.8, 1.2), y0: 236, y1: 150, val: 2000, card: () => SPRB.starwhale.l, rule: 'waves', hint: '浪推来时拉，浪退时松' },
-  dragon:    { name: '海龙王',     len: 2600, pow: .92, spd: 38, tele: .68, calm: () => rand(.8, 1.5), dash: () => rand(.8, 1.2), y0: 226, y1: 150, val: 3000, card: () => SPRB.dragon.l, phases: true, hint: '三个阶段，考你前面学过的' },
+  dragon:    { name: '海龙王',     len: 2000, pow: .82, spd: 38, tele: .68, calm: () => rand(.8, 1.5), dash: () => rand(.8, 1.2), y0: 226, y1: 150, val: 3000, card: () => SPRB.dragon.l, phases: true, hint: '三个阶段，考你前面学过的' },
 };
 const BOSS_ORDER = ZONES.map(z => z.boss);
 const FISH_ORDER = ZONES.flatMap(z => z.fish);
@@ -3124,8 +3127,8 @@ function tensionStep(A, dt, reel) {
     tickT -= dt; if (tickT <= 0) { tickT = .09; SFX.tick(); }
   } else {
     if (!(A.tangle > 0)) tension = Math.max(0, tension - 45 * dt);
-    const suck = rule === 'suck' && !(A.stun > 0) && !(A.frenzy > 0);
-    prog = dashing ? -A.spd * (suck ? 1.4 : 1) * dt : A.tangle > 0 ? 0 : suck ? -30 * dt : rule === 'waves' && A.waveDir < 0 ? -4 * dt : -8 * dt;
+    const suck = A === B && sucking(A);
+    prog = dashing ? -A.spd * dt : A.tangle > 0 ? 0 : suck ? -20 * dt : rule === 'waves' && A.waveDir < 0 ? -4 * dt : -8 * dt;
   }
   if (dashing) {
     if (hold) { A.vibT = (A.vibT || 0) - dt; if (A.vibT <= 0) { A.vibT = .22; vib(35); } }
@@ -3239,11 +3242,12 @@ function startBoss() {
   B.onTele = () => {
     if (key === 'kraken') B.side = Math.random() < .5 ? -1 : 1;
     B.double = bRule(B) === 'claws' && Math.random() < .5; B.lastHoldTele = -1;
+    if (bRule(B) === 'runes') { B.runeDur = rand(.4, .75); B.timer = B.runeDur * 3; }
   };
   // 遗迹守护者: letting go while the third rune is lit (after holding through the first two) shatters the runes
   B.onDash = () => {
     if (bRule(B) !== 'runes') return false;
-    const perfect = !hold && B.lastHoldTele >= RUNE * 2; B.lastHoldTele = -1;
+    const perfect = !hold && B.lastHoldTele >= runeDur(B) * 2; B.lastHoldTele = -1;
     if (!perfect) return false;
     B.stun = 1.3; sparks(B.x, B.y, '#5ff2d0', 20, 55); SFX.buff(); pop('完美！符文碎了', 90, 130, '#5ff2d0', 12, 1.3);
     return true;
@@ -3305,9 +3309,10 @@ function updBoss(dt) {
     if (b.heat >= 1) { b.heat = .45; tension += 32; SFX.snap(); sparks(b.px, b.py - 10, '#ff7a2a', 14, 50); pop('过热!', 90, 130, '#ff7a2a', 13, 1); }
   } else b.heat = 0;
   // 遗迹守护者: remember how long the player kept reeling into the rune countdown
-  if (rule === 'runes' && b.state === 'tele' && hold) b.lastHoldTele = d.tele - b.timer;
+  if (rule === 'runes' && b.state === 'tele' && hold) b.lastHoldTele = runeT(b);
   // 星鲸: each calm spell is a wave pushing the whale toward you (reel!) or dragging it away (let go)
   if (rule === 'waves' && b.state === 'calm' && b.prevState !== 'calm') b.waveDir = Math.random() < .7 ? -b.waveDir : b.waveDir;
+  b.calmT = b.state === 'calm' ? (b.calmT || 0) + dt : 0;
   b.prevState = b.state;
   let prog = tensionStep(b, dt, REEL * run.reel);
   b.p = clamp(b.p + prog / b.len, 0, 1);
@@ -3320,7 +3325,7 @@ function updBoss(dt) {
   if (b.key === 'kraken' || d.phases) {
     const ph = b.p >= 2 / 3 ? 2 : b.p >= 1 / 3 ? 1 : 0;
     if (ph > b.phase) {
-      b.phase = ph; b.frenzy = 2.4; b.pow = d.pow * run.calm * (1 + .1 * run.zone) * (1 + .12 * ph); b.freq = 1 + .25 * ph; tension = 0;
+      b.phase = ph; b.frenzy = 2.4; const up = b.key === 'dragon' ? .5 : 1; b.pow = d.pow * run.calm * (1 + .1 * run.zone) * (1 + .12 * ph * up); b.freq = 1 + .25 * ph * up; tension = 0;
       b.double = false; b.combo = 0; b.heat = 0;
       slowT = .45; flash = .7; shake = 6; SFX.crit(); SFX.buff(); vib([60, 30, 60]);
       pop('破防!', 90, 130, '#ffe14a', 16, 1.4);
@@ -3601,7 +3606,7 @@ function drawFight() {
 // The boss (body + tentacles / neck) is painted into its own layer so a flash tints every part at once.
 const bossLayer = mk(W, H), bossCtx = bossLayer.getContext('2d');
 function drawBoss() {
-  const b = B, fl = b.state === 'tele' && Math.floor(T * 6) % 2 === 0 && !(bRule(b) === 'runes' && b.d.tele - b.timer < RUNE * 2), stun = b.stun > 0 && Math.floor(T * 5) % 2 === 0;
+  const b = B, fl = b.state === 'tele' && Math.floor(T * 6) % 2 === 0 && !(bRule(b) === 'runes' && runeEarly(b)), stun = b.stun > 0 && Math.floor(T * 5) % 2 === 0;
   const img = (S, left) => left ? S.l : S.r;
   const main = g; g = bossCtx; g.clearRect(0, 0, W, H);
   let top;
@@ -3688,7 +3693,7 @@ function drawRuleCues(b, top) {
     txt('热', R(b.px - w / 2) - 6, y + 2.5, 7, '#ffb07a');
   }
   if (rule === 'runes') {
-    const lit = b.state === 'tele' ? Math.min(3, Math.floor((b.d.tele - b.timer) / RUNE) + 1) : 0;
+    const lit = b.state === 'tele' ? Math.min(3, Math.floor(runeT(b) / runeDur(b)) + 1) : 0;
     for (let k = 0; k < 3; k++) {
       const x = R(b.x - 16 + k * 12), y = top - 16, on = k < lit, last = k === 2 && on;
       g.fillStyle = OUT; g.fillRect(x - 1, y - 1, 9, 9); g.fillStyle = on ? (last ? '#ffd23f' : '#5ff2d0') : '#3a4048'; g.fillRect(x, y, 7, 7);
@@ -3705,7 +3710,7 @@ function drawRuleCues(b, top) {
       else { g.fillRect(x - 3, y, 7, 1); g.fillRect(x - 2, y + 1, 5, 1); g.fillRect(x - 1, y + 2, 3, 1); g.fillRect(x, y + 3, 1, 1); }
     }
   }
-  if (rule === 'suck' && !hold && b.state === 'calm' && b.stun <= 0 && !(b.frenzy > 0)) {
+  if (!hold && sucking(b)) {
     for (let k = 0; k < 3; k++) { const u = (T * 1.6 + k / 3) % 1, y = R(b.py + 6 + u * 20); g.globalAlpha = 1 - u; g.fillStyle = '#e9b8ff'; g.fillRect(R(b.px) - 3 + k * 3 - 3, y, 1, 4); g.globalAlpha = 1; }
   }
 }
@@ -3850,20 +3855,20 @@ function drawOverlay(z) {
   if (state === 'fight' || state === 'boss') {
     const A = state === 'fight' ? F : B;
     drawTension(state === 'boss' && B && B.invis);
-    if (A && A.state === 'tele' && Math.floor(T * 5) % 2 === 0 && !(A === B && bRule(B) === 'runes' && A.d.tele - A.timer < RUNE * 2)) {
+    if (A && A.state === 'tele' && Math.floor(T * 5) % 2 === 0 && !(A === B && bRule(B) === 'runes' && runeEarly(A))) {
       // red frame around the screen while a struggle is winding up
       g.fillStyle = '#ff3b3b'; g.globalAlpha = .75;
       g.fillRect(0, 0, W, 3); g.fillRect(0, H - 3, W, 3); g.fillRect(0, 0, 3, H); g.fillRect(W - 3, 0, 3, H); g.globalAlpha = 1;
     }
     if (A) {
       const rule = A === B ? bRule(B) : null, free = !(A.stun > 0) && !(A.frenzy > 0);
-      const early = rule === 'runes' && A.state === 'tele' && A.d.tele - A.timer < RUNE * 2;   // first two runes: still safe to reel
+      const early = rule === 'runes' && A.state === 'tele' && runeEarly(A);   // first two runes: still safe to reel
       const danger = (A.state === 'tele' || A.state === 'dash') && free && !early;
       if (danger && hold) { g.globalAlpha = Math.min(.18, tension / 450) + .03 * Math.sin(T * 4); g.fillStyle = '#ff2a2a'; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
       const special = !free ? null : A.tangle > 0 ? 'mash' : early ? 'runes'
         : rule === 'claws' && A.double && A.combo === 1 && A.state === 'calm' ? 'again'
         : rule === 'heat' && hold && A.heat > .7 && A.state === 'calm' ? 'cool'
-        : rule === 'suck' && !hold && A.state === 'calm' ? 'grab'
+        : !hold && sucking(A) ? 'grab'
         : rule === 'waves' && A.state === 'calm' ? (A.waveDir > 0 ? (hold ? 'reeling' : 'wavein') : 'waveout') : null;
       drawAction(special || (A.frenzy > 0 ? 'frenzy' : A.stun > 0 ? 'stun' : danger ? (hold ? 'release' : 'waitout') : (hold ? 'reeling' : 'hold')));
     }
