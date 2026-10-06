@@ -323,10 +323,10 @@ async function check(name, fn, saved) {
     v = await run(boss(5) + 'B.latch=B.latch0=1.2; ' + step(10) + 'sucking(B)');
     assert.equal(v, false, 'a quarter second of grace after the lunge');
     // guardian: reel through two runes and let go on the third -> stunned instead of lunging; letting go early -> it lunges
-    v = await run(boss(6) + 'B.timer=.001; hold=true; updBoss(.02); const pace=B.runeDur; for(let i=0;i<200 && runeEarly(B);i++) updBoss(.02); hold=false; ' + step(60) + '[B.stun>0, B.state, pace>=.4 && pace<=.75]');
+    v = await run(boss(6) + 'B.timer=.001; hold=true; updBoss(.02); const beats=B.runeDurs.slice(); for(let i=0;i<200 && runeEarly(B);i++) updBoss(.02); hold=false; ' + step(60) + '[B.stun>0, B.state, beats.length === 3 && beats.every(x => x >= .45 && x <= .9)]');
     assert.deepEqual(v, [true, 'calm', true]);
-    v = await run(boss(6) + 'const paces=new Set(); for(let i=0;i<20;i++){ B.state="calm"; B.timer=.001; updBoss(.02); paces.add(B.runeDur.toFixed(2)); } paces.size');
-    assert.ok(v > 10, 'rune pace varies: ' + v);
+    v = await run(boss(6) + 'let uneven=0; for(let i=0;i<20;i++){ B.state="calm"; B.timer=.001; updBoss(.02); const [a,b,c]=B.runeDurs; if (Math.abs(a-b) > .05 || Math.abs(b-c) > .05) uneven++; } uneven');
+    assert.ok(v >= 15, 'beats within a countdown differ: ' + v);
     v = await run(boss(6) + 'B.timer=.001; hold=false; updBoss(.02); for(let i=0;i<300 && B.state==="tele";i++) updBoss(.02); [B.stun>0, B.state]');
     assert.deepEqual(v, [false, 'dash']);
     // starwhale: reeling with the wave is faster and calm; against it the line strains
