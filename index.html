@@ -3784,7 +3784,7 @@ function drawHUD(z) {
   const money = String(R(coinsShown)), moneySize = money.length > 6 ? 7 : 8;
   const moneySprite = textSprite({ s: money, size: moneySize, col: '#ffe14a', stroke: OUT });
   const moneyWidth = (moneySprite.w - 2 * moneySprite.pad) / K;
-  const right = paused ? 159 : 177, pw = R(moneyWidth) + (shopOn ? 27 : 17), px = right - pw;
+  const right = 159, pw = R(moneyWidth) + (shopOn ? 27 : 17), px = right - pw;
   coinPill = [px, 1, pw, 15];
   g.fillStyle = OUT; g.fillRect(px, 2, pw, 13); g.fillRect(px + 1, 1, pw - 2, 15);
   g.fillStyle = '#2a2f45'; g.fillRect(px + 1, 2, pw - 2, 13); g.fillStyle = '#3a4260'; g.fillRect(px + 2, 2, pw - 4, 1);
