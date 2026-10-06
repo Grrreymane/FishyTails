@@ -3026,12 +3026,12 @@ window.addEventListener('contextmenu', e => { if (!shareEl) e.preventDefault(); 
 
 let shopTab = 0, shopSel = null, shopBack = 'title';
 const shopTabRect = i => [12 + i * 39, 108, 37, 15];
-const SHOP_PER = 5, SHOP_PREV = [110, 88, 17, 14], SHOP_NEXT = [151, 88, 17, 14];
+const SHOP_PER = 5, SHOP_PREV = [42, 280, 32, 15], SHOP_NEXT = [106, 280, 32, 15];
 let shopPage = 0;
 const shopPages = cat => Math.ceil(SHOP[cat].items.length / SHOP_PER);
 const shopPageOf = cat => Math.floor(Math.max(0, SHOP[cat].items.findIndex(it => it.id === WALLET.eq[cat])) / SHOP_PER);
-const shopRowRect = i => [12, 128 + i * 32, 156, 30];
-const shopBtnRect = i => [118, 135 + i * 32, 46, 16];
+const shopRowRect = i => [12, 128 + i * 30, 156, 28];
+const shopBtnRect = i => [118, 134 + i * 30, 46, 16];
 function openShop(from) { shopBack = from; shopSel = null; shopPage = shopPageOf(SHOP_CATS[shopTab]); go('shop'); SFX.click(); }
 function shopPress(p) {
   if (inR(p, BTN.shopClose)) { if (shopBack === 'run') { state = menuFrom; st = menuRunTime; hold = false; jerk = false; } else { go(shopBack); st = 2; } SFX.click(); return; }
@@ -3046,7 +3046,7 @@ function shopPress(p) {
       shopSel = it.id;
       if (WALLET.eq[cat] === it.id) return;
       if (!owns(cat, it.id)) {
-        if (WALLET.coins < it.price) { pop('金币不足', 140, 140 + i * 32, '#ff6a5a', 9, .9); SFX.fail(); return; }
+        if (WALLET.coins < it.price) { pop('金币不足', 140, 140 + i * 30, '#ff6a5a', 9, .9); SFX.fail(); return; }
         WALLET.coins -= it.price; WALLET.owned[cat].push(it.id); SFX.buff(); pop('买到了!', 90, 60, '#ffe14a', 11, 1);
       } else SFX.click();
       WALLET.eq[cat] = it.id; saveWallet();
@@ -4229,13 +4229,13 @@ function drawShop() {
   drawAngler(62, sy, blinkT < 0 ? 'blink' : 'happy', eq);
   drawRod(h, { x: h.x + 22, y: h.y - 26 }, eq.rod);
   const pages = shopPages(cat);
-  if (pages > 1) {   // page flipper in the preview's water: ◀ 1/2 ▶
+  if (pages > 1) {   // page flipper under the list: ◀ 1/2 ▶
     for (const [r, d] of [[SHOP_PREV, -1], [SHOP_NEXT, 1]]) {
       button(r, '');
       const cx = r[0] + r[2] / 2, cy = r[1] + r[3] / 2; g.fillStyle = '#ffffff';
       for (let k = 0; k < 4; k++) g.fillRect(R(cx - d * 1.5 + d * k), R(cy - 3 + k), 1, 7 - 2 * k);
     }
-    txt((shopPage + 1) + '/' + pages, 139, 95, 8, '#ffffff', 'center');
+    txt((shopPage + 1) + ' / ' + pages, 90, 287.5, 8, '#4a2c17', 'center', null);
   }
   SHOP_CATS.forEach((c, i) => {
     const r = shopTabRect(i);
