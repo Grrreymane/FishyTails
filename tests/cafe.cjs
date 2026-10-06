@@ -309,21 +309,25 @@ async function check(name, fn, saved) {
     v = await run(boss(4) + step(140, 'hold = (i % 50) < 32;') + '[tension < 50, B.heat < 1]');
     assert.deepEqual(v, [true, true]);
     // kraken: letting go in a calm spell drags it back much faster than other bosses
-    v = await run(boss(5) + step(100) + 'B.p');
-    assert.ok(v < .28, 'kraken drag ' + v);
+    v = await run(boss(5) + 'B.latch=B.latch0=1.4; ' + step(60) + '[B.p, sucking(B)]');
+    assert.ok(v[0] < .285, 'kraken latch drag ' + v);
+    v = await run(boss(5) + 'B.latch=B.latch0=1.4; hold=true; ' + step(60) + '[B.p, tension > 40]');
+    assert.ok(Math.abs(v[0] - .3) < .001 && v[1], 'kraken tug of war ' + v);
+    v = await run(boss(5) + 'B.state="dash"; B.timer=.01; ' + step(5) + 'B.onCalm(); [latched(B), B.latch > .8]');
+    assert.deepEqual(v, [true, true]);
     v = await run(boss(3) + step(100) + 'B.p');
     assert.ok(v > .28, 'ghost drift ' + v);
     // ...but letting go while it struggles costs only the usual amount (no suction during a lunge or right after it)
     v = await run(boss(5) + 'B.state="dash"; B.timer=10; const p0=B.p; ' + step(50) + '[(p0 - B.p) * B.len / B.spd, sucking(B)]');
     assert.ok(Math.abs(v[0] - 1) < .05 && v[1] === false, 'kraken lunge drag ' + JSON.stringify(v));
-    v = await run(boss(5) + 'B.state="calm"; B.timer=10; B.calmT=0; ' + step(10) + 'sucking(B)');
-    assert.equal(v, false);
+    v = await run(boss(5) + 'B.latch=B.latch0=1.2; ' + step(10) + 'sucking(B)');
+    assert.equal(v, false, 'a quarter second of grace after the lunge');
     // guardian: reel through two runes and let go on the third -> stunned instead of lunging; letting go early -> it lunges
     v = await run(boss(6) + 'B.timer=.001; hold=true; updBoss(.02); const pace=B.runeDur; for(let i=0;i<200 && runeEarly(B);i++) updBoss(.02); hold=false; ' + step(60) + '[B.stun>0, B.state, pace>=.4 && pace<=.75]');
     assert.deepEqual(v, [true, 'calm', true]);
     v = await run(boss(6) + 'const paces=new Set(); for(let i=0;i<20;i++){ B.state="calm"; B.timer=.001; updBoss(.02); paces.add(B.runeDur.toFixed(2)); } paces.size');
     assert.ok(v > 10, 'rune pace varies: ' + v);
-    v = await run(boss(6) + 'B.timer=.001; hold=false; ' + step(100) + '[B.stun>0, B.state]');
+    v = await run(boss(6) + 'B.timer=.001; hold=false; updBoss(.02); for(let i=0;i<300 && B.state==="tele";i++) updBoss(.02); [B.stun>0, B.state]');
     assert.deepEqual(v, [false, 'dash']);
     // starwhale: reeling with the wave is faster and calm; against it the line strains
     v = await run(boss(7) + 'B.waveDir=1; hold=true; ' + step(50) + '[B.p, tension]');
