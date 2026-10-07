@@ -1094,7 +1094,29 @@ function buildScenery(zi) {
 
 // ============================================================ saves (per-browser)
 function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
-function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} reportProgress(); }
+// AI Made Games platform: inside the site's in-site player, report a one-line progress summary
+// that shows as "your save" on the game page. Does nothing when the game runs anywhere else.
+var platformEmbed = window.parent !== window, platformTimer = 0, platformLast = '';
+function platformProgress() {
+  const dex = load('sea-monster-dex', null), top = +load('sea-monster-best', 0) || 0;
+  const n = dex ? Object.keys(dex.fish || {}).length + Object.keys(dex.boss || {}).length : 0;
+  if (!n && !top) return '';
+  const coins = top.toLocaleString(LANG === 'en' ? 'en-US' : 'zh-CN');
+  if (LANG === 'en') return n >= 45 ? `Dex complete! Best run ${coins} coins` : `Dex ${n}/45 · best run ${coins} coins`;
+  return n >= 45 ? `图鉴全收集！单局最高 ${coins} 金币` : `图鉴 ${n}/45 · 单局最高 ${coins} 金币`;
+}
+function reportProgress() {
+  if (!platformEmbed) return;
+  clearTimeout(platformTimer);
+  platformTimer = setTimeout(() => {
+    const text = platformProgress();
+    if (!text || text === platformLast) return;
+    platformLast = text;
+    try { window.parent.postMessage({ source: 'aimadegames', v: 1, type: 'progress', text: text.slice(0, 120) }, '*'); } catch (e) {}
+  }, 1500);
+}
+reportProgress();
 let DEX = load('sea-monster-dex', { fish: {}, boss: {}, zone: 0 });
 DEX.fish = DEX.fish || {}; DEX.boss = DEX.boss || {}; DEX.zone = DEX.zone || 0;
 let best = load('sea-monster-best', 0);
