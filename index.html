@@ -1056,12 +1056,18 @@ function buildScenery(zi) {
 // sees them. Anywhere else (GitHub Pages, a plain tab, tests, the SDK failing to load) localStorage as before.
 // Add ?cloud to a plain tab to try the SDK there (it runs as a local guest).
 const GAME_VERSION = '1.1.0';
-const CLOUD_ORIGIN = 'https://www.ai-made.games', CLOUD_GAME = '98b7e3cc-59ec-4b20-a65c-2d9f396eba33';
+// The platform answers on more than one address (www.ai-made.games, www.aiwanna.games); talk to the one framing us.
+const PLATFORM_ORIGINS = ['https://www.ai-made.games', 'https://www.aiwanna.games', 'https://ai-made.games', 'https://aiwanna.games'];
+const framedBy = (() => {
+  try { const a = location.ancestorOrigins; if (a && a.length) return a[0]; } catch (e) {}
+  try { return new URL(document.referrer).origin; } catch (e) { return ''; }
+})();
+const CLOUD_ORIGIN = PLATFORM_ORIGINS.includes(framedBy) ? framedBy : PLATFORM_ORIGINS[0], CLOUD_GAME = '98b7e3cc-59ec-4b20-a65c-2d9f396eba33';
 const SAVE_KEYS = ['sea-monster-dex', 'sea-monster-best', 'sea-monster-shop', 'sea-monster-cafe', 'sea-monster-run', 'sea-monster-mute'];
 // framed by the platform's player (a page that frames the game elsewhere must not wait on the platform)
 const platformEmbed = (() => {
   try { if (window.parent === window) return false; } catch (e) {}
-  try { const a = location.ancestorOrigins; if (a && a.length) return /^https:\/\/(www\.)?(ai-made|aiwanna)\.games$/.test(a[0]); } catch (e) {}
+  try { const a = location.ancestorOrigins; if (a && a.length) return PLATFORM_ORIGINS.includes(a[0]); } catch (e) {}
   return true;
 })();
 // legacy = this device's progress from before cloud saves, offered on the title only when the SDK restored
@@ -1149,7 +1155,7 @@ if (cloudWanted()) cloudStart();
 // ---------- leaderboard (1GP, REST): one entry per attempt, scored with the coins that attempt reached.
 // A continue is a new attempt from the zone checkpoint. Only inside the platform's player; never blocks play.
 const LB_BOARD = '86288afe-498e-43e4-ab12-e4a768d56c28';   // 单局最高金币 (key best-coins)
-const LB = { session: null, connecting: null, shown: null };
+const LB = { session: null, connecting: null, shown: null, origin: '' };
 const uuid = () => { try { return crypto.randomUUID(); } catch (e) { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : r & 3 | 8).toString(16); }); } };
 function lbConnect() {
   if (LB.session && Date.parse(LB.session.expiresAt) > Date.now() + 60000) return Promise.resolve(LB.session);
@@ -1160,20 +1166,21 @@ function lbConnect() {
     const done = () => { clearTimeout(timer); window.removeEventListener('message', receive); LB.connecting = null; };
     function receive(e) {
       const d = e.data;
-      if (e.source !== window.parent || e.origin !== CLOUD_ORIGIN || !d || d.source !== 'aimadegames-platform' || d.type !== 'leaderboard-session' || d.requestId !== requestId) return;
+      if (e.source !== window.parent || !PLATFORM_ORIGINS.includes(e.origin) || !d || d.source !== 'aimadegames-platform' || d.type !== 'leaderboard-session' || d.requestId !== requestId) return;
       done();
-      if (d.error || !d.session || typeof d.session.token !== 'string' || d.apiOrigin !== CLOUD_ORIGIN) { reject(new Error(d.error || 'bad session')); return; }
-      LB.session = d.session; resolve(d.session);
+      if (d.error || !d.session || typeof d.session.token !== 'string' || d.apiOrigin !== e.origin) { reject(new Error(d.error || 'bad session')); return; }
+      LB.session = d.session; LB.origin = e.origin; resolve(d.session);
     }
     const timer = setTimeout(() => { done(); reject(new Error('timeout')); }, 15000);
     window.addEventListener('message', receive);
-    window.parent.postMessage({ source: 'aimadegames', type: 'leaderboard-session', requestId }, CLOUD_ORIGIN);
+    // only the address actually framing us receives it (others are dropped by the browser); the answer names it
+    PLATFORM_ORIGINS.forEach(o => { try { window.parent.postMessage({ source: 'aimadegames', type: 'leaderboard-session', requestId }, o); } catch (e) {} });
   });
   return LB.connecting;
 }
 async function lbApi(path, opt, again) {
   const s = await lbConnect(); opt = opt || {};
-  const res = await fetch(CLOUD_ORIGIN + '/api/v1/' + path, Object.assign({}, opt, { credentials: 'omit', signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined, headers: Object.assign({ Authorization: 'Bearer ' + s.token }, opt.headers || {}) }));
+  const res = await fetch((LB.origin || CLOUD_ORIGIN) + '/api/v1/' + path, Object.assign({}, opt, { credentials: 'omit', signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined, headers: Object.assign({ Authorization: 'Bearer ' + s.token }, opt.headers || {}) }));
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && !again) { LB.session = null; return lbApi(path, opt, true); }
   if (!res.ok) { const e = new Error(data.error && data.error.message || 'leaderboard'); e.code = data.error && data.error.code; throw e; }
@@ -1204,7 +1211,9 @@ function lbCheckpoint(r) {
   if (!r || !r.lb || practice || Math.floor(r.coins || 0) <= (r.lbSent || 0)) return;
   lbSubmit(r); lbStart(r);
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden && run && IN_RUN.includes(state)) lbCheckpoint(run); });
+const lbLeaving = () => { if (run && IN_RUN.includes(state)) lbCheckpoint(run); };
+document.addEventListener('visibilitychange', () => { if (document.hidden) lbLeaving(); });
+window.addEventListener('pagehide', lbLeaving);   // the player's close button removes the frame without hiding it first
 // AI Made Games platform: inside the site's in-site player, report a one-line progress summary
 // that shows as "your save" on the game page. Does nothing when the game runs anywhere else.
 var platformTimer = 0, platformLast = '';
