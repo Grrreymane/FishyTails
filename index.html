@@ -1186,15 +1186,25 @@ function lbStart(r) {
   lbApi('leaderboards/' + LB_BOARD + '/runs', { method: 'POST', headers: { 'Idempotency-Key': key } })
     .then(x => { if (x && x.runId) r.lb = { id: x.runId, key: uuid() }; }).catch(() => {});
 }
-// once, when the attempt ends (out of line, or the last boss beaten)
+// when the attempt ends (out of line, or the last boss beaten), and at the checkpoints below
 function lbSubmit(r) {
   const lb = r && r.lb; if (!lb || practice) return;
   r.lb = null;
   const score = Math.max(0, Math.floor(r.coins || 0)), body = JSON.stringify({ score });
-  const send = () => lbApi('runs/' + encodeURIComponent(lb.id) + '/score', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': lb.key }, body });
+  if (score <= (r.lbSent || 0)) return;   // nothing new since the last checkpoint (that open board run just expires)
+  r.lbSent = score;
+  // keepalive: the score still goes out when the player is leaving the page
+  const send = () => lbApi('runs/' + encodeURIComponent(lb.id) + '/score', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': lb.key }, body });
   send().catch(e => { if (!e.code || e.code === 'SERVICE_UNAVAILABLE' || e.code === 'RATE_LIMITED') return new Promise(ok => setTimeout(ok, 5000)).then(send); throw e; })
     .then(x => { if (x && x.rank) LB.shown = { run: r, rank: x.rank }; }).catch(() => {});
 }
+// A run still going counts too: beating a sea monster, going home or leaving the page settles the coins
+// so far, and the same run carries on under a new board run (the board keeps each player's best).
+function lbCheckpoint(r) {
+  if (!r || !r.lb || practice || Math.floor(r.coins || 0) <= (r.lbSent || 0)) return;
+  lbSubmit(r); lbStart(r);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && run && IN_RUN.includes(state)) lbCheckpoint(run); });
 // AI Made Games platform: inside the site's in-site player, report a one-line progress summary
 // that shows as "your save" on the game page. Does nothing when the game runs anywhere else.
 var platformTimer = 0, platformLast = '';
@@ -3057,7 +3067,7 @@ function setupZone(zi) {
     if (zi > DEX.zone) { DEX.zone = zi; save('sea-monster-dex', DEX); }
     if (gear('boat').zoneShield) { run.shield += 1; run.stacks.shield = run.shield; if (!run.order.includes('shield')) run.order.push('shield'); }
     // checkpoint: what the run looked like on entering this zone, restored by "continue"
-    const { cp, lb, ...snap } = run; run.cp = JSON.parse(JSON.stringify(snap));
+    const { cp, lb, lbSent, ...snap } = run; run.cp = JSON.parse(JSON.stringify(snap));
   }
   enterScene(zi);
 }
@@ -3256,7 +3266,7 @@ function onPress(p) {
     else if (inR(p, BTN.menuSound)) { muted = !muted; save('sea-monster-mute', muted); SFX.click(); }
     else if (inR(p, BTN.menuCafe)) openCafe('menu');
     else if (inR(p, BTN.menuDex)) openDex('menu');
-    else if (inR(p, BTN.menuHome)) { F = null; B = null; biter = null; bob = null; hook = null; INK = []; tension = 0; go('title'); SFX.click(); }
+    else if (inR(p, BTN.menuHome)) { lbCheckpoint(run); F = null; B = null; biter = null; bob = null; hook = null; INK = []; tension = 0; go('title'); SFX.click(); }
     return;
   }
   if (state === 'shop') { shopPress(p); return; }
@@ -3609,7 +3619,7 @@ function bossCatch() {
   SFX.bigSplash(); SFX.caught(); splash(B.x, 30, 1.6); shake = 7; flash = .6; vib([60, 40, 120]); mood('happy', 4.5);
   const img = B.d.card(), w = img.width, h = img.height;
   leap = { key: B.key, img, w, h, x0: B.x, y0: Math.min(B.y, SURF + 40), x1: 90, y1: 140, t: 0, dur: .8, sc: Math.max(1, Math.min(2, Math.floor(140 / w), Math.floor(84 / h))), boss: true };
-  run.bossDone = true; B = null; INK = []; tension = 0; go('leap');
+  run.bossDone = true; B = null; INK = []; tension = 0; go('leap'); lbCheckpoint(run);
 }
 function updTrans() {
   if (st >= .4 && !transDone) { transDone = true; setupZone(run.zone + 1); }
