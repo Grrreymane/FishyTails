@@ -1202,7 +1202,14 @@ function lbSubmit(r) {
   r.lbSent = score;
   // keepalive: the score still goes out when the player is leaving the page
   const send = () => lbApi('runs/' + encodeURIComponent(lb.id) + '/score', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': lb.key }, body });
-  send().catch(e => { if (!e.code || e.code === 'SERVICE_UNAVAILABLE' || e.code === 'RATE_LIMITED') return new Promise(ok => setTimeout(ok, 5000)).then(send); throw e; })
+  // a run kept in an old save may be past the 2-hour window: settle the same coins on a fresh board run instead
+  const fresh = () => lbApi('leaderboards/' + LB_BOARD + '/runs', { method: 'POST', headers: { 'Idempotency-Key': uuid() } })
+    .then(x => lbApi('runs/' + encodeURIComponent(x.runId) + '/score', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': uuid() }, body }));
+  send().catch(e => {
+    if (e.code === 'RUN_EXPIRED' || e.code === 'RUN_NOT_FOUND') return fresh();
+    if (!e.code || e.code === 'SERVICE_UNAVAILABLE' || e.code === 'RATE_LIMITED') return new Promise(ok => setTimeout(ok, 5000)).then(send);
+    throw e;
+  })
     .then(x => { if (x && x.rank) LB.shown = { run: r, rank: x.rank }; }).catch(() => {});
 }
 // A run still going counts too: beating a sea monster, going home or leaving the page settles the coins
