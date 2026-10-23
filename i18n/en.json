@@ -536,5 +536,6 @@
  "w3ce923bf": "Save failed to load, please reload",
  "w99f4b763": "Loading save…",
  "t15202d74": "Dex {0}/45 · best run {1} coins",
- "t4ff7dbb0": "Dex complete! Best run {0} coins"
+ "t4ff7dbb0": "Dex complete! Best run {0} coins",
+ "wb2981bef": "Cloud save not connected, saving on this device"
 }
