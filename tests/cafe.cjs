@@ -352,6 +352,24 @@ async function check(name, fn, saved) {
     await run('startPractice(6); leavePractice("title");');
     assert.equal(await run('JSON.stringify([SAVED,WALLET,DEX,CAFE])===window.beforePractice'),true);
   });
+  await check('sea states: first win unlocks the picker, rules stack, wins unlock the next level and its gear', async ({run}) => {
+    await run('DEX.heat=-1; DEX.heatSel=null; SAVED=null; go("title"); startNew();');
+    assert.equal(await run('state'), 'idle', 'before the first win a new game goes straight out');
+    await run('DEX.heat=4; DEX.heatSel=null; go("title"); startNew();');
+    assert.deepEqual(await run('[state, heatSel, heatTop()]'), ['heat', 5, 5]);
+    await run('onPress({x:145,y:106});');
+    assert.equal(await run('heatSel'), 0, 'next past the top wraps to normal');
+    await run('heatSel=5; onPress({x:56,y:275});');
+    assert.deepEqual(await run('[state, run.heat, run.hp, need(), heatOn(4), heatOn(6)]'), ['idle', 5, 2, 5, true, false]);
+    await run('run.zone=8; winGame();');
+    assert.deepEqual(await run('[DEX.heat, run.heatNew, heatTop()]'), [5, true, 6]);
+    assert.deepEqual(await run('[heatLocked(itemOf("hat","wave")), heatLocked(itemOf("boat","storm")), owns("hat","wave"), owns("boat","storm")]'), [false, true, true, false]);
+    // heat 10: retrying gives no shield; a long fight tires the fish out
+    await run('newRun(10); setupZone(2); const s0 = run.shield; gameOver(); continueRun(); window.sh = [s0, run.shield];');
+    assert.deepEqual(await run('window.sh'), [0, 0]);
+    await run('biter={key:"cod",shiny:false,x:90,y:180,face:1}; bob={x:90}; startFight(); F.age=45; F.state="calm"; F.timer=0; updFight(.01); F.state="tele"; F.timer=0; updFight(.01);');
+    assert.ok(await run('F.timer < 1.4 / 2.5'), 'tired fish dash briefly');
+  });
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log(`${passed} checks passed; no browser runtime errors.`);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { if (browser) await browser.close(); server.close(); });
