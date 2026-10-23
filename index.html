@@ -38,6 +38,22 @@
 (() => {
 'use strict';
 const SCRIPT_TEXT = document.currentScript ? document.currentScript.textContent : '';
+// ============================================================ fresh build
+// A browser can keep serving an older copy of this page from its cache (the platform frames the game under a
+// fixed address). Ask the host for the page's date; when it is newer than this copy, load it once under a new
+// address so the cache can't answer. Once per newer date per tab, so a stale proxy can't loop it.
+(function freshBuild() {
+  if (!/^https?:$/.test(location.protocol) || !window.fetch) return;
+  const mine = Date.parse(document.lastModified);
+  fetch(location.pathname, { method: 'HEAD', cache: 'no-store' }).then(r => {
+    const theirs = Date.parse(r.headers.get('Last-Modified') || '');
+    if (!(theirs > mine + 1000)) return;
+    const mark = 'fishy-fresh-' + theirs;
+    try { if (sessionStorage.getItem(mark)) return; sessionStorage.setItem(mark, '1'); } catch (e) { return; }
+    const u = new URL(location.href); u.searchParams.set('build', String(theirs));
+    location.replace(u.href);
+  }).catch(() => {});
+})();
 // ============================================================ constants
 const W = 180, H = 320, SURF = 84, SEABED = 300, NEED = 4, BX = 6, OUT = '#1b1b2f';
 // Fight tuning (checked with a Monte-Carlo of play styles): holding through a dash must snap the line,
