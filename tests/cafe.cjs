@@ -370,6 +370,25 @@ async function check(name, fn, saved) {
     await run('biter={key:"cod",shiny:false,x:90,y:180,face:1}; bob={x:90}; startFight(); F.age=45; F.state="calm"; F.timer=0; updFight(.01); F.state="tele"; F.timer=0; updFight(.01);');
     assert.ok(await run('F.timer < 1.4 / 2.5'), 'tired fish dash briefly');
   });
+  await check('endless deep: dive on after the Dragon King, layers cycle the seas, no retries when the hearts run out', async ({run}) => {
+    await run('DEX.deep=0; newRun(0); run.zone=8; run.hp=6; run.shield=5; winGame(); st=1; onPress({x:90,y:205});');
+    assert.deepEqual(await run('[state, run.deep, run.hp, run.shield]'), ['trans', 1, 4, 1], 'the dive trims hearts and shields to the deep caps');
+    await run('for (let i=0;i<120;i++) update(.02,.02);');
+    assert.deepEqual(await run('[state, run.zone, layerNo(run), DEX.deep]'), ['idle', 0, 10, 10]);
+    // the last sea of a cycle leads to the first one again, one layer deeper
+    await run('setupZone(8); run.bossDone=true; show={boss:true}; endShow(); for (let i=0;i<120;i++) update(.02,.02);');
+    assert.deepEqual(await run('[run.zone, layerNo(run), DEX.deep]'), [0, 11, 11]);
+    // deeper means stronger fish; the weakening buffs stop at a floor
+    const shallow = await run('run.deep=1; biter={key:Z().fish[0],shiny:false,x:90,y:180,face:1}; bob={x:90}; startFight(); const p1=F.pow; F=null; run.deep=20; biter={key:Z().fish[0],shiny:false,x:90,y:180,face:1}; bob={x:90}; startFight(); [p1, F.pow, F.tele]');
+    assert.ok(shallow[1] > shallow[0] * 2 && shallow[2] >= .15, JSON.stringify(shallow));
+    await run('F=null; for (let i=0;i<40;i++) { applyBuff("line",1); applyBuff("calm",1); applyBuff("shield",1); }');
+    assert.deepEqual(await run('[run.line >= .6, run.calm >= .65, run.shield]'), [true, true, 1]);
+    // out of hearts: the dive is over, nothing to retry, and "play again" starts fresh
+    await run('go("idle"); gameOver();');
+    assert.deepEqual(await run('[state, SAVED]'), ['over', null]);
+    await run('st=1; DEX.heat=-1; onPress({x:90,y:205});');
+    assert.deepEqual(await run('[state, run.deep || 0]'), ['idle', 0]);
+  });
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log(`${passed} checks passed; no browser runtime errors.`);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { if (browser) await browser.close(); server.close(); });
