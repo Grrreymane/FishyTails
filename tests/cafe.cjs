@@ -443,6 +443,22 @@ async function check(name, fn, saved) {
     await run('hold = false; for (let i = 0; i < 5; i++) { jerk = true; updFight(.01); } updFight(.01);');
     assert.equal(await run('F.ice'), 0, 'five taps crack the ice');
   });
+  await check('treasures: sea-state runs pick one of three after each monster; weather ones only in their weather', async ({run}) => {
+    await run('newRun(0); setupZone(0); show = { boss: true }; endShow();');
+    assert.equal(await run('state'), 'trans', 'the normal sea has no treasures');
+    await run('newRun(1); setupZone(0); show = { boss: true }; endShow();');
+    assert.deepEqual(await run('[state, run.relicOffer.length, run.relicOffer.some(id => RELICS[id].w > 1), !!SAVED.relicOffer]'), ['relic', 3, false, true]);
+    await run('const first = run.relicOffer[0]; st = 1; render(); onPress({ x: 90, y: 120 }); window.first = first;');
+    assert.deepEqual(await run('[state, run.relics.length, run.relics[0] === window.first, run.relicOffer]'), ['trans', 1, true, null]);
+    // what a few of them do
+    await run('newRun(1); run.relics = ["hook2", "dice"];');
+    assert.deepEqual(await run('[need(), maxHp()]'), [3, 5]);
+    await run('newRun(3); setupZone(2); go("idle"); run.relics = ["silk"]; bob = { x: 90, dip: 0 }; hook = { x: 90, y: 180 }; biter = { key: "cod", shiny: false, x: 90, y: 180, face: 1 }; startFight(); const r = Math.random; Math.random = () => 0; breakLine(); Math.random = r;');
+    assert.equal(await run('run.hp'), 2, 'the silk held');
+    // the last monster of a sea-state run ends it: no pick before the win
+    await run('newRun(2); setupZone(8); run.bossDone = true; show = { boss: true }; endShow();');
+    assert.equal(await run('state'), 'win');
+  });
   await check('rare fish: one per sea, only from sea state 3 or in the deep, two buffs each, own dex pages', async ({run}) => {
     assert.deepEqual(await run('[RARE.length, DEX_TOTAL, DEX_PAGES, ZONES.every((z, i) => SP[z.rare].zone === i), RARE.every(k => SP[k].rescue || DISH[k])]'), [9, 54, 11, true, true]);
     const seen = h => run(`newRun(${h}); setupZone(4); let n = 0; for (let i = 0; i < 2000; i++) if (weightedFish() === 'phoenix') n++; n`);
