@@ -389,6 +389,22 @@ async function check(name, fn, saved) {
     await run('st=1; DEX.heat=-1; onPress({x:90,y:205});');
     assert.deepEqual(await run('[state, run.deep || 0]'), ['idle', 0]);
   });
+  await check('after the Dragon King the title still offers the dive, and a new run goes through the picker', async ({run, page}) => {
+    await run('DEX.heat=-1; newRun(0); run.zone=8; run.hp=5; winGame(); st=1; onPress({x:124,y:276});');
+    assert.deepEqual(await run('[state, SAVED && SAVED.won]'), ['title', true]);
+    await page.reload(); await page.waitForFunction(() => window.__test);
+    await run('go("title"); st=2; render()');
+    await page.screenshot({ path: path.join(root, '.shots/title-won.png') });
+    // "new run" opens the picker; backing out keeps the dive waiting
+    await run('onPress({x:90,y:215});');
+    assert.deepEqual(await run('[state, heatSel]'), ['heat', 1]);
+    await run('render(); onPress({x:124,y:275});');
+    assert.deepEqual(await run('[state, SAVED && SAVED.won]'), ['title', true]);
+    await run('onPress({x:90,y:194});');
+    assert.deepEqual(await run('[state, run.deep, run.won, run.hp, layerNo(run)]'), ['trans', 1, false, 4, 10]);
+    await run('for (let i=0;i<120;i++) update(.02,.02);');
+    assert.deepEqual(await run('[state, SAVED.won, SAVED.deep]'), ['idle', false, 1]);
+  });
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log(`${passed} checks passed; no browser runtime errors.`);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { if (browser) await browser.close(); server.close(); });

@@ -540,9 +540,7 @@
  "wb2981bef": "Sin nube: se guarda en este dispositivo",
  "w4f38f73e": "Oleaje",
  "tce6aa627": "Oleaje {0}",
- "w056cb2e4": "Elige el oleaje",
  "w7cda072d": "Normal",
- "w87301431": "Como siempre",
  "t8f58621e": "Monedas +{0}%",
  "w2b076411": "Gana para mares más bravos",
  "t05cf0b26": "Gana el oleaje {0} para el siguiente",
@@ -574,5 +572,11 @@
  "wdb75857d": "Leyenda del abismo",
  "w7a924341": "Compartir",
  "w25c408b3": "Inicio",
- "t79475d11": "Buceé hasta la capa {0} del Abismo sin fin en Fishy Tails. ¡Te toca!"
+ "t79475d11": "Buceé hasta la capa {0} del Abismo sin fin en Fishy Tails. ¡Te toca!",
+ "w92cf9113": "Nueva partida",
+ "wf24a3030": "Nueva partida · Oleaje",
+ "w01ba342c": "Dificultad original, desde el mar 1",
+ "w27c12ad4": "Con tus mejoras, sin reintentos",
+ "w54b9e372": "Desde el mar 1, más difícil y rentable",
+ "w8e6fbef3": "Empieza de nuevo en el mar 1"
 }
