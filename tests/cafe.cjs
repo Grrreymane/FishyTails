@@ -355,23 +355,37 @@ async function check(name, fn, saved) {
   await check('sea states: first win unlocks the picker, rules stack, wins unlock the next level and its gear', async ({run}) => {
     await run('DEX.heat=-1; DEX.heatSel=null; SAVED=null; go("title"); startNew();');
     assert.equal(await run('state'), 'idle', 'before the first win a new game goes straight out');
-    await run('DEX.heat=4; DEX.heatSel=null; go("title"); startNew();');
-    assert.deepEqual(await run('[state, heatSel, heatTop()]'), ['heat', 5, 5]);
+    await run('DEX.heat=1; DEX.heatSel=null; go("title"); startNew();');
+    assert.deepEqual(await run('[state, heatSel, heatTop()]'), ['heat', 2, 2]);
     await run('onPress({x:145,y:106});');
     assert.equal(await run('heatSel'), 0, 'next past the top wraps to normal');
-    await run('heatSel=5; onPress({x:56,y:275});');
-    assert.deepEqual(await run('[state, run.heat, run.hp, need(), heatOn(4), heatOn(6)]'), ['idle', 5, 2, 5, true, false]);
-    await run('run.zone=8; winGame();');
-    assert.deepEqual(await run('[DEX.heat, run.heatNew, heatTop()]'), [5, true, 6]);
-    assert.deepEqual(await run('[heatLocked(itemOf("hat","wave")), heatLocked(itemOf("boat","storm")), owns("hat","wave"), owns("boat","storm")]'), [false, true, true, false]);
-    // heat 10: retrying gives no shield; a long fight tires the fish out
-    await run('newRun(10); setupZone(2); const s0 = run.shield; gameOver(); continueRun(); window.sh = [s0, run.shield];');
-    assert.deepEqual(await run('window.sh'), [0, 0]);
+    // the rain: the rules card shows first and its tap does not cast; monsters stop healing, shields stop at 2
+    await run('heatSel=2; onPress({x:56,y:275});');
+    assert.deepEqual(await run('[state, heatCard, run.heat, run.hp, maxShield(), rareOn()]'), ['idle', true, 2, 3, 2, true]);
+    await run('render(); onPress({x:90,y:160});');
+    assert.deepEqual(await run('[state, heatCard]'), ['idle', false]);
+    await run('setupZone(0); run.hp=2; leap={key:"puffer",boss:true,img:SPR.clown.r,w:1,h:1,sc:1}; startShow();');
+    assert.equal(await run('run.hp'), 2, 'no heart back from a monster in the rain');
+    // winning it unlocks the snow and the rain's boat; the dive stays closed until the snow is beaten
+    await run('show=null; go("idle"); run.zone=8; winGame(); st=1;');
+    assert.deepEqual(await run('[DEX.heat, run.heatNew, heatTop(), deepOpen(), SAVED]'), [2, true, 3, false, null]);
+    assert.deepEqual(await run('[heatLocked(itemOf("hat","wave")), heatLocked(itemOf("boat","storm")), heatLocked(itemOf("hat","trident")), owns("boat","storm")]'), [false, false, true, true]);
+    await run('render(); onPress({x:90,y:197});');
+    assert.deepEqual(await run('[state, heatSel]'), ['heat', 3], 'without the dive the first button starts the next sea state');
+    // the snow: 2 hearts of at most 4, no shield on retry, three retries and then a fresh start
+    await run('newRun(3); setupZone(2); window.sh = [run.hp, maxHp()]; const s0 = run.shield; for (let i = 0; i < 3; i++) { gameOver(); continueRun(); } window.sh.push(s0, run.shield, run.continues); gameOver();');
+    assert.deepEqual(await run('[...window.sh, SAVED, contLeft()]'), [2, 4, 0, 0, 3, null, 0]);
+    await run('st=1; render(); onPress({x:90,y:205});');
+    assert.equal(await run('state'), 'heat', 'out of retries: play again');
+    await run('newRun(3); run.zone=8; winGame();');
+    assert.deepEqual(await run('[run.deepNew, deepOpen(), !!SAVED.won]'), [true, true, true]);
+    // old ten-level saves fold into three
+    assert.deepEqual(await run('[heatV3(-1), heatV3(0), heatV3(3), heatV3(4), heatV3(7), heatV3(10), runV3({heat: 6, cp: {heat: 6}}).cp.heat]'), [-1, 0, 1, 2, 3, 3, 2]);
     await run('biter={key:"cod",shiny:false,x:90,y:180,face:1}; bob={x:90}; startFight(); F.age=45; F.state="calm"; F.timer=0; updFight(.01); F.state="tele"; F.timer=0; updFight(.01);');
     assert.ok(await run('F.timer < 1.4 / 2.5'), 'tired fish dash briefly');
   });
   await check('endless deep: dive on after the Dragon King, layers cycle the seas, no retries when the hearts run out', async ({run}) => {
-    await run('DEX.deep=0; newRun(0); run.zone=8; run.hp=6; run.shield=5; winGame(); st=1; onPress({x:90,y:205});');
+    await run('DEX.deep=0; DEX.heat=3; newRun(0); run.zone=8; run.hp=6; run.shield=5; winGame(); st=1; onPress({x:90,y:205});');
     assert.deepEqual(await run('[state, run.deep, run.hp, run.shield]'), ['trans', 1, 4, 1], 'the dive trims hearts and shields to the deep caps');
     await run('for (let i=0;i<120;i++) update(.02,.02);');
     assert.deepEqual(await run('[state, run.zone, layerNo(run), DEX.deep]'), ['idle', 0, 10, 10]);
@@ -390,14 +404,14 @@ async function check(name, fn, saved) {
     assert.deepEqual(await run('[state, run.deep || 0]'), ['idle', 0]);
   });
   await check('after the Dragon King the title still offers the dive, and a new run goes through the picker', async ({run, page}) => {
-    await run('DEX.heat=-1; newRun(0); run.zone=8; run.hp=5; winGame(); st=1; onPress({x:124,y:276});');
+    await run('DEX.heat=3; DEX.heatSel=null; save("sea-monster-dex", DEX); newRun(0); run.zone=8; run.hp=5; winGame(); st=1; onPress({x:124,y:276});');
     assert.deepEqual(await run('[state, SAVED && SAVED.won]'), ['title', true]);
     await page.reload(); await page.waitForFunction(() => window.__test);
     await run('go("title"); st=2; render()');
     await page.screenshot({ path: path.join(root, '.shots/title-won.png') });
     // "new run" opens the picker; backing out keeps the dive waiting
     await run('onPress({x:90,y:215});');
-    assert.deepEqual(await run('[state, heatSel]'), ['heat', 1]);
+    assert.deepEqual(await run('[state, heatSel]'), ['heat', 3]);
     await run('render(); onPress({x:124,y:275});');
     assert.deepEqual(await run('[state, SAVED && SAVED.won]'), ['title', true]);
     await run('onPress({x:90,y:194});');
@@ -408,11 +422,11 @@ async function check(name, fn, saved) {
   await check('rare fish: one per sea, only from sea state 3 or in the deep, two buffs each, own dex pages', async ({run}) => {
     assert.deepEqual(await run('[RARE.length, DEX_TOTAL, DEX_PAGES, ZONES.every((z, i) => SP[z.rare].zone === i), RARE.every(k => SP[k].rescue || DISH[k])]'), [9, 54, 11, true, true]);
     const seen = h => run(`newRun(${h}); setupZone(4); let n = 0; for (let i = 0; i < 2000; i++) if (weightedFish() === 'phoenix') n++; n`);
-    assert.equal(await seen(2), 0, 'calm seas have no rare fish');
-    const n3 = await seen(3); assert.ok(n3 > 80 && n3 < 220, 'sea state 3 rate ' + n3);
+    assert.equal(await seen(1), 0, 'no rare fish before the rain');
+    const n2 = await seen(2); assert.ok(n2 > 80 && n2 < 220, 'rain rate ' + n2);
     assert.ok(await run('newRun(0); run.deep = 1; setupZone(2); let n = 0; for (let i = 0; i < 2000; i++) if (weightedFish() === "beluga") n++; n > 80'));
     // catching one: both buffs, the coins, a dex entry; a rescued one goes back to sea instead of the cooler
-    await run('newRun(3); setupZone(1); go("idle"); leap = { key: "angel", shiny: false, boss: false, img: SPR.angel.r, w: 1, h: 1, sc: 1 }; startShow();');
+    await run('newRun(2); setupZone(1); go("idle"); leap = { key: "angel", shiny: false, boss: false, img: SPR.angel.r, w: 1, h: 1, sc: 1 }; startShow();');
     assert.deepEqual(await run('[run.stacks.calm, run.stacks.crit, !!DEX.fish.angel, CAFE.cooler.angel.n, show.buff2, show.rare]'), [2, 2, true, 1, 'crit', true]);
     await run('setupZone(2); go("idle"); leap = { key: "beluga", shiny: false, boss: false, img: SPR.beluga.r, w: 1, h: 1, sc: 1 }; startShow();');
     assert.deepEqual(await run('[run.shield, run.stacks.slow, !!CAFE.cooler.beluga, show.note]'), [2, 2, false, '放生  人气+1']);
