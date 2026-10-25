@@ -10,8 +10,8 @@
   wantedTrack = () => 'z0';          // the sunny tune all the way through, instead of a new one at every cut
   muted = false;
   setLang('zh');
-  // the new outfits from this update are worn in every shot
-  const GEAR = { hat: 'wizard', boat: 'whale', fur: 'galaxy' };   // (no thunder rod: its zaps flash the fish yellow)
+  // the starting outfit in every shot (the new ones get their own try-on shot)
+  const GEAR = Object.fromEntries(SHOP_CATS.map(c => [c, SHOP[c].items[0].id]));
   const wear = () => Object.assign(WALLET.eq, GEAR);
   wear();
 
@@ -53,13 +53,14 @@
   shots.push({ len: 2.7, start() {
     bossAt(5, .86); B.phase = 2;   // already past its phase breaks, so no 破防 pop over the leap
   }, during() { if (state === 'boss') { hold = true; run.reel = 0; B.state = 'calm'; B.timer = 9; B.latch = 0; B.p = Math.min(1, B.p + DT * .3); tension = 30; } } });
-  // 5. sea states 1 → 10 after the first win
-  shots.push({ len: 1.7, caption: '海况 1~10', capY: 48, start() {
-    cleanSlate(); run = null; DEX.heat = 9; heatSel = 1; go('heat');
-  }, during(t) { heatSel = Math.min(10, 1 + Math.floor(t / .15)); } });
-  // 6. after the Dragon King: dive on into the endless deep
-  shots.push({ len: 1.9, start() {   // no caption: the game's own card already says 无尽深海
-    fresh(8); run.bossDone = true; run.deep = 11; run.heat = 7; transDone = false; go('trans'); silent(.5);
+  // 5. the endless deep: no bottom. Quick cuts down through the layers, a counter that keeps climbing, a fish
+  //    fighting harder at each one, ending on a monster warning and the question that makes people want to try.
+  [[12, 3, 'bonefish'], [27, 0, 'sword'], [43, 6, 'grouper']].forEach(([layer, zi, k]) => shots.push({ len: .6, caption: '第 ' + layer + ' 层', capY: 232, capSize: 24, start() {
+    fresh(zi); run.deep = layer - ZONES.length; run.heat = 10; silent(.25);
+    F = { key: k, shiny: false, x: 120, y: SURF + 1, px: 120, py: SURF + 1, face: -1 }; catchFish(); leap.dur = .64; mood('happy', 2);
+  } }));
+  shots.push({ len: 1.5, caption: '你能潜多深？', start() {
+    fresh(8); run.deep = 60 - ZONES.length; run.heat = 10; run.zoneCaught = NEED; startBoss(); silent(.3);
   } });
   // 7. new outfits, tried on in the shop
   const LOOKS = [['wizard', 'whale', 'galaxy'], ['shark', 'teacup', 'blue'], ['frog', 'lotus', 'cow'], ['trident', 'storm', 'mackerel'], ['chef', 'shell', 'orange']];
@@ -101,9 +102,9 @@
   const total = shots.reduce((s, x) => s + x.len, 0);
 
   // caption: big outlined words that slide in
-  function caption(s, age, len, capY = 60) {
+  function caption(s, age, len, capY = 60, size = 15) {
     if (!s || REC.arg === 'nocaption') return;   // --arg nocaption: clean frames for store screenshots
-    const a = Math.min(1, age / .12, (len - age) / .12), c = textSprite({ s, size: 15, col: '#ffffff', stroke: OUT });
+    const a = Math.min(1, age / .12, (len - age) / .12), c = textSprite({ s, size, col: size > 15 ? '#8ab8ff' : '#ffffff', stroke: OUT });
     const slide = (1 - Math.min(1, age / .15)) * 8;
     ctx.globalAlpha = Math.max(0, a); ctx.drawImage(c.cv, R(W * K / 2 - c.w / 2), R((capY + slide) * K - c.h / 2)); ctx.globalAlpha = 1;
   }
@@ -125,7 +126,7 @@
       if (sh.caption !== lastCap) { lastCap = sh.caption; capStart = t; }
       if (sh.caption) {
         let end = acc + sh.len, j = k + 1; while (j < shots.length && shots[j].caption === sh.caption) end += shots[j++].len;
-        caption(sh.caption, t - capStart, end - capStart, sh.capY);
+        caption(sh.caption, t - capStart, end - capStart, sh.capY, sh.capSize);
       }
     } });
 }
