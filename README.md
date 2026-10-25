@@ -6,7 +6,7 @@
 
 **在线试玩：** https://grrreymane.github.io/FishyTails/
 
-**中文 / English**：按浏览器语言自动选择，标题画面左上角可切换。宣传视频：[trailer.mp4](trailer.mp4)（竖屏 21 秒，`tools/trailer.js` 生成）；截图在 [media/shots](media/shots)，英文封面 [media/cover-en.png](media/cover-en.png)（`tools/cover.js` 生成）。上一版封面和视频留在 [media/v1](media/v1)。
+**中文 / English**：按浏览器语言自动选择，标题画面左上角可切换。宣传视频：[trailer.mp4](trailer.mp4)（竖屏 21 秒，`tools/trailer.js` 生成）；截图在 [media/shots](media/shots)，英文封面 [media/cover-en.png](media/cover-en.png)（`tools/cover-classic.js`：第一版封面的画面，标题换成游戏里的像素字；穿新装扮的另一版是 `media/cover-outfit.png`，`tools/cover.js` 生成）。上一版封面和视频留在 [media/v1](media/v1)。
 
 ## 怎么玩
 
