@@ -4878,7 +4878,7 @@ function drawDex() {
   panel(4, 24, 172, 270);
   const zi = dexPage, z = ZONES[zi], rare = !z, known = rare || zi <= DEX.zone, dark = '#4a2c17';
   txt(rare ? '稀有鱼' : known ? z.name : '???', 90, 40, 12, rare ? '#c0306a' : dark, 'center', null);
-  txt(rare ? '海况 3 以上或无尽深海才会出现' : '已收集 ' + dexCount() + ' / ' + DEX_TOTAL, 90, 53, 7, '#8a6a4a', 'center', null);
+  txt(rare ? '海况 2 以上或无尽深海才会出现' : '已收集 ' + dexCount() + ' / ' + DEX_TOTAL, 90, 53, 7, '#8a6a4a', 'center', null);
   button(BTN.dexClose, '×');
   const row = (y, h) => { g.fillStyle = '#c9a86a'; g.fillRect(11, y, 158, h); g.fillStyle = '#ecd49c'; g.fillRect(12, y + 1, 156, h - 2); };
   (rare ? RARE.slice((zi - ZONES.length) * 5, (zi - ZONES.length) * 5 + 5) : z.fish).forEach((k, i) => {

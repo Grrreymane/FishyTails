@@ -586,7 +586,6 @@
  "wcd625ee8": "Comet Sashimi",
  "w648de0ad": "Rare fish!",
  "w8d174b00": "Rare Fish",
- "wbe05bc05": "Only at Sea State 3+ or in the Endless Deep",
  "t788e7275": "Dex {0}/{1} · best run {2} coins",
  "wf0b2b865": "Gale",
  "w4bbdd1ec": "Drizzle",
@@ -633,5 +632,6 @@
  "w93938d08": "Hand Warmer",
  "w02b41350": "Cracked ice: 1 s frenzy",
  "w324a2d9e": "Silk held!",
- "t7f010206": "Shark scared off! +{0}"
+ "t7f010206": "Shark scared off! +{0}",
+ "wb8e86a5f": "Only at Sea State 2+ or in the Endless Deep"
 }

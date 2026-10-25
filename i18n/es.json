@@ -586,7 +586,6 @@
  "wcd625ee8": "Sashimi cometa",
  "w648de0ad": "¡Pez raro!",
  "w8d174b00": "Peces raros",
- "wbe05bc05": "Solo con oleaje 3+ o en el Abismo sin fin",
  "t788e7275": "Peces {0}/{1} · récord {2} monedas",
  "wf0b2b865": "Vendaval",
  "w4bbdd1ec": "Llovizna",
@@ -633,5 +632,6 @@
  "w93938d08": "Calientamanos",
  "w02b41350": "Hielo roto: 1 s de frenesí",
  "w324a2d9e": "¡La seda aguantó!",
- "t7f010206": "¡Tiburón ahuyentado! +{0}"
+ "t7f010206": "¡Tiburón ahuyentado! +{0}",
+ "wb8e86a5f": "Solo con oleaje 2+ o en el Abismo sin fin"
 }
