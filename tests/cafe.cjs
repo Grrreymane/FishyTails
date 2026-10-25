@@ -405,6 +405,20 @@ async function check(name, fn, saved) {
     await run('for (let i=0;i<120;i++) update(.02,.02);');
     assert.deepEqual(await run('[state, SAVED.won, SAVED.deep]'), ['idle', false, 1]);
   });
+  await check('rare fish: one per sea, only from sea state 3 or in the deep, two buffs each, own dex pages', async ({run}) => {
+    assert.deepEqual(await run('[RARE.length, DEX_TOTAL, DEX_PAGES, ZONES.every((z, i) => SP[z.rare].zone === i), RARE.every(k => SP[k].rescue || DISH[k])]'), [9, 54, 11, true, true]);
+    const seen = h => run(`newRun(${h}); setupZone(4); let n = 0; for (let i = 0; i < 2000; i++) if (weightedFish() === 'phoenix') n++; n`);
+    assert.equal(await seen(2), 0, 'calm seas have no rare fish');
+    const n3 = await seen(3); assert.ok(n3 > 80 && n3 < 220, 'sea state 3 rate ' + n3);
+    assert.ok(await run('newRun(0); run.deep = 1; setupZone(2); let n = 0; for (let i = 0; i < 2000; i++) if (weightedFish() === "beluga") n++; n > 80'));
+    // catching one: both buffs, the coins, a dex entry; a rescued one goes back to sea instead of the cooler
+    await run('newRun(3); setupZone(1); go("idle"); leap = { key: "angel", shiny: false, boss: false, img: SPR.angel.r, w: 1, h: 1, sc: 1 }; startShow();');
+    assert.deepEqual(await run('[run.stacks.calm, run.stacks.crit, !!DEX.fish.angel, CAFE.cooler.angel.n, show.buff2, show.rare]'), [2, 2, true, 1, 'crit', true]);
+    await run('setupZone(2); go("idle"); leap = { key: "beluga", shiny: false, boss: false, img: SPR.beluga.r, w: 1, h: 1, sc: 1 }; startShow();');
+    assert.deepEqual(await run('[run.shield, run.stacks.slow, !!CAFE.cooler.beluga, show.note]'), [2, 2, false, '放生  人气+1']);
+    await run('go("dex"); dexPage = 9; render(); dexPage = 10; render(); onPress({ x: 150, y: 279 });');
+    assert.equal(await run('dexPage'), 0, 'the last rare page wraps to the first sea');
+  });
   assert.deepEqual(errors, [], 'No browser runtime errors');
   console.log(`${passed} checks passed; no browser runtime errors.`);
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(async () => { if (browser) await browser.close(); server.close(); });
