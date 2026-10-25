@@ -96,7 +96,7 @@ async function check(name, fn, saved) {
     assert.deepEqual(result, [0, true, true, 0]);
   });
   await check('pointer controls open shop, dex and café and return to fishing', async ({ run, page }) => {
-    await run('newRun(); go("idle")');
+    await run('newRun(); go("idle"); render()');   // the coin pill's hit area is laid out by the first render
     const box = await page.locator('#c').boundingBox();
     const click = (x, y) => page.mouse.click(box.x + x * box.width / 180, box.y + y * box.height / 320);
     await click(152, 8); assert.equal(await run('state'), 'shop');
@@ -418,6 +418,30 @@ async function check(name, fn, saved) {
     assert.deepEqual(await run('[state, run.deep, run.won, run.hp, layerNo(run)]'), ['trans', 1, false, 4, 10]);
     await run('for (let i=0;i<120;i++) update(.02,.02);');
     assert.deepEqual(await run('[state, SAVED.won, SAVED.deep]'), ['idle', false, 1]);
+  });
+  await check('weather rules: gale scares nibblers on an early press, drizzle sends a shark, snow freezes the line', async ({run}) => {
+    const wait = h => `newRun(${h}); setupZone(0); go('idle'); startCast(); for (let i = 0; i < 300 && state !== 'wait'; i++) update(.02, .02); spawnBiter(); biter.ph = 'nibble';`;
+    await run(wait(0) + 'onPress({x: 90, y: 160});');
+    assert.equal(await run('biter.ph'), 'nibble', 'calm seas: an early press does nothing');
+    await run(wait(1) + 'onPress({x: 90, y: 160});');
+    assert.equal(await run('biter.ph'), 'leave', 'gale: an early press scares the fish off');
+    await run('bob.dip = 0; biter = null; gust();');
+    assert.ok(await run('bob.dip > 5'), 'a gust sinks the float');
+    // drizzle: past the shark's time a fin swims in and takes the fish; the fed shark skips the next two fights
+    const fight = h => `newRun(${h}); setupZone(1); go('idle'); bob = { x: 90, dip: 0 }; hook = { x: 90, y: 180 }; biter = { key: 'eel', shiny: false, x: 90, y: 180, face: 1 }; startFight(); F.frenzy = 0;`;
+    await run(fight(2) + 'F.t = 50; updFight(.01);');
+    assert.ok(await run('!!F.shark'), 'a fin appears');
+    await run('F.shark.x = F.x; updFight(.01);');
+    assert.deepEqual(await run('[F, run.sharkFull, state]'), [null, 2, 'pause']);
+    await run(fight(2).replace('newRun(2); setupZone(1); ', '') + 'F.t = 50; updFight(.01);');
+    assert.deepEqual(await run('[!!F.shark, F.noShark, run.sharkFull]'), [false, true, 1]);
+    // snow: a frozen line holds still while the fish slips back; five taps crack it
+    await run(fight(3) + 'F.iceT = 0; F.state = "calm"; F.timer = 1; updFight(.01);');
+    assert.ok(await run('F.ice > 0'), 'the line freezes');
+    const y0 = await run('hold = true; const y = F.y; for (let i = 0; i < 10; i++) updFight(.02); [y, F.y]');
+    assert.ok(y0[1] > y0[0], 'frozen: holding does not reel, the fish slips back');
+    await run('hold = false; for (let i = 0; i < 5; i++) { jerk = true; updFight(.01); } updFight(.01);');
+    assert.equal(await run('F.ice'), 0, 'five taps crack the ice');
   });
   await check('rare fish: one per sea, only from sea state 3 or in the deep, two buffs each, own dex pages', async ({run}) => {
     assert.deepEqual(await run('[RARE.length, DEX_TOTAL, DEX_PAGES, ZONES.every((z, i) => SP[z.rare].zone === i), RARE.every(k => SP[k].rescue || DISH[k])]'), [9, 54, 11, true, true]);
