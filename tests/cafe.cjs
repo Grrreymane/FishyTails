@@ -357,8 +357,10 @@ async function check(name, fn, saved) {
     assert.equal(await run('state'), 'idle', 'before the first win a new game goes straight out');
     await run('DEX.heat=1; DEX.heatSel=null; go("title"); startNew();');
     assert.deepEqual(await run('[state, heatSel, heatTop()]'), ['heat', 2, 2]);
-    await run('onPress({x:145,y:106});');
-    assert.equal(await run('heatSel'), 0, 'next past the top wraps to normal');
+    await run('render(); { const r = heatTile(3); onPress({x: r[0] + 60, y: r[1] + 20}); }');
+    assert.equal(await run('heatSel'), 2, 'a locked sea state cannot be picked');
+    await run('{ const r = heatTile(0); onPress({x: r[0] + 60, y: r[1] + 20}); }');
+    assert.equal(await run('heatSel'), 0, 'tapping a card picks it');
     // the rain: the rules card shows first and its tap does not cast; monsters stop healing, shields stop at 2
     await run('heatSel=2; onPress({x:56,y:275});');
     assert.deepEqual(await run('[state, heatCard, run.heat, run.hp, maxShield(), rareOn()]'), ['idle', true, 2, 3, 2, true]);
@@ -418,6 +420,20 @@ async function check(name, fn, saved) {
     assert.deepEqual(await run('[state, run.deep, run.won, run.hp, layerNo(run)]'), ['trans', 1, false, 4, 10]);
     await run('for (let i=0;i<120;i++) update(.02,.02);');
     assert.deepEqual(await run('[state, SAVED.won, SAVED.deep]'), ['idle', false, 1]);
+  });
+  await check('sea-state outfits unlock with a clear and are bought, never worn for free; the title names the sea state and layer', async ({run}) => {
+    await run('DEX.heat=0; WALLET.coins=100000; saveWallet();');
+    const locks = '["jacket","raincoat"].map(id => heatLocked(itemOf("coat", id))).concat([owns("coat","jacket"), owns("hat","flatcap")])';
+    assert.deepEqual(await run(locks), [true, true, false, false]);
+    await run('DEX.heat=1;');
+    assert.deepEqual(await run(locks), [false, true, false, false]);
+    const press = i => `render(); { const b = shopBtnRect(${i}); onPress({x: b[0] + 5, y: b[1] + 5}); }`;
+    await run(`openShop("title"); shopTab=SHOP_CATS.indexOf("coat"); shopPage=0; ${press(2)} ${press(1)}`);
+    assert.deepEqual(await run('[WALLET.eq.coat, WALLET.coins, owns("coat","jacket"), owns("coat","raincoat")]'), ['jacket', 94000, true, false]);
+    const label = 'go("title"); TQ.length=0; render(); TQ.map(q => q.s).find(s => /^继续/.test(s))';
+    assert.equal(await run(`newRun(2); run.deep=3; saveRun(); ${label}`), '继续 · 海况 2 · 第 12 层');
+    assert.equal(await run(`newRun(2); saveRun(); ${label}`), '继续 · 海况 2');
+    assert.equal(await run(`newRun(0); saveRun(); ${label}`), '继续 · ' + await run('ZONES[0].name'));
   });
   await check('weather rules: gale scares nibblers on an early press, drizzle sends a shark, snow freezes the line', async ({run}) => {
     const wait = h => `newRun(${h}); setupZone(0); go('idle'); startCast(); for (let i = 0; i < 300 && state !== 'wait'; i++) update(.02, .02); spawnBiter(); biter.ph = 'nibble';`;

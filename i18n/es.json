@@ -1,4 +1,14 @@
 {
+ "w2e34963b": "Ropa",
+ "wc54e0344": "Chaleco",
+ "w14ee43ac": "Chaqueta encerada",
+ "wbba39fa5": "Impermeable",
+ "wf5e564f3": "Plumífero",
+ "wb88bb8a6": "Gorra plana",
+ "w2918db9c": "Sueste",
+ "w62c995f6": "Gorro de aviador",
+ "t64e35fbd": "Gana el oleaje {0} para desbloquear",
+ "t8625f697": "Oleaje {0} · Capa {1}",
  "meta.title": "Fishy Tails",
  "w48afe37f": "Pez payaso",
  "w71b90478": "Recoge rápido",
@@ -541,8 +551,6 @@
  "tce6aa627": "Oleaje {0}",
  "w7cda072d": "Normal",
  "t8f58621e": "Monedas +{0}%",
- "w2b076411": "Gana para mares más bravos",
- "t05cf0b26": "Gana el oleaje {0} para el siguiente",
  "t519225b6": "Gana el oleaje {0} para obtenerlo",
  "t7824394e": "¡Oleaje {0} desbloqueado!",
  "tfc7daa0e": "Probar oleaje {0}",
@@ -564,7 +572,6 @@
  "t79475d11": "Buceé hasta la capa {0} del Abismo sin fin en Fishy Tails. ¡Te toca!",
  "w92cf9113": "Nueva partida",
  "wf24a3030": "Nueva partida · Oleaje",
- "w01ba342c": "Dificultad original, desde el mar 1",
  "w27c12ad4": "Con tus mejoras, sin reintentos",
  "w54b9e372": "Desde el mar 1, más difícil y rentable",
  "w8e6fbef3": "Empieza de nuevo en el mar 1",
@@ -633,5 +640,8 @@
  "w02b41350": "Hielo roto: 1 s de frenesí",
  "w324a2d9e": "¡La seda aguantó!",
  "t7f010206": "¡Tiburón ahuyentado! +{0}",
- "wb8e86a5f": "Solo con oleaje 2+ o en el Abismo sin fin"
+ "wb8e86a5f": "Solo con oleaje 2+ o en el Abismo sin fin",
+ "w9044189b": "Dificultad original",
+ "w91752a67": "Sin tesoros",
+ "w2988ff3e": "Vence a un monstruo: elige 1 de 3 tesoros"
 }
