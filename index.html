@@ -1205,8 +1205,9 @@ function buildScenery(zi) {
 const GAME_VERSION = '1.1.0';
 // The platform answers on more than one address (www.ai-made.games, www.aiwanna.games); talk to the one framing us.
 const PLATFORM_ORIGINS = ['https://www.ai-made.games', 'https://www.aiwanna.games', 'https://ai-made.games', 'https://aiwanna.games'];
+// Firefox reports a hidden parent (the player frames games with no-referrer) as the string "null": unknown, not elsewhere.
 const framedBy = (() => {
-  try { const a = location.ancestorOrigins; if (a && a.length) return a[0]; } catch (e) {}
+  try { const a = location.ancestorOrigins; if (a && a.length && a[0] !== 'null') return a[0]; } catch (e) {}
   try { return new URL(document.referrer).origin; } catch (e) { return ''; }
 })();
 const CLOUD_ORIGIN = PLATFORM_ORIGINS.includes(framedBy) ? framedBy : PLATFORM_ORIGINS[0], CLOUD_GAME = '98b7e3cc-59ec-4b20-a65c-2d9f396eba33';
@@ -1214,8 +1215,7 @@ const SAVE_KEYS = ['sea-monster-dex', 'sea-monster-best', 'sea-monster-shop', 's
 // framed by the platform's player (a page that frames the game elsewhere must not wait on the platform)
 const platformEmbed = (() => {
   try { if (window.parent === window) return false; } catch (e) {}
-  try { const a = location.ancestorOrigins; if (a && a.length) return PLATFORM_ORIGINS.includes(a[0]); } catch (e) {}
-  return true;
+  return framedBy ? PLATFORM_ORIGINS.includes(framedBy) : true;
 })();
 // legacy = this device's progress from before cloud saves, offered on the title only when the SDK restored
 // nothing (it is never uploaded by itself). err = initialize failed: no fresh start on top of it.
