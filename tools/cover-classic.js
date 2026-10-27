@@ -19,12 +19,15 @@
       strip(1896, 300, 408, 1180, 1764);    // lower down, stay clear of the kraken arm's splash on the left
       strip(1600, 408, 444, 1180, 1600, 160);   // horizon waves under the old tagline
       const en = REC.arg === 'en'; setLang(en ? 'en' : 'zh'); TQ.length = 0;
-      if (en) txt('Fishy Tails', 236, 30, 28, '#ffe14a', 'center', OUT, 1, 110);
-      else {
+      if (en) {   // the tagline takes two lines in English, filling the footprint the way the Chinese title does
+        txt('Fishy Tails', 236, 25, 32, '#ffe14a', 'center', OUT, 1, 116);
+        txt('Fish · Buff up', 236, 50, 12, '#ffffff', 'center', OUT);
+        txt('Beat sea monsters', 236, 63.5, 12, '#ffffff', 'center', OUT, 1, 92);
+      } else {
         txt('渔喵传说', 236, 25, 32, '#ffe14a', 'center', OUT, 1, 106);   // stays inside the old title's footprint
         txt('FISHY TAILS', 236, 51, 12, '#9fe8ff', 'center', OUT);
+        txt('钓鱼 · 吃Buff · 打海怪', 236, 63.5, 9, '#ffffff', 'center', OUT, 1, 92);   // clear of the kraken arm's tip on the left
       }
-      txt(en ? '猫猫钓鱼 · 吃Buff · 打海怪' : '钓鱼 · 吃Buff · 打海怪', 236, en ? 52 : 63.5, 9, '#ffffff', 'center', OUT, 1, 92);   // clear of the kraken arm's tip on the left
       for (const t of TQ) { const c = textSprite(t), tw = c.w - 2 * c.pad; o.drawImage(c.cv, R(t.x * K - c.pad - tw / 2), R(t.y * K - c.h / 2)); }
     } });
 }
